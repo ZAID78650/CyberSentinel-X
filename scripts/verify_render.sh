@@ -4,7 +4,8 @@
 #
 # Verifies the live site the way a judge would: login -> upload the UNSW
 # sample -> ingest through the real detection pipeline -> confirm events,
-# alerts, incidents and the 3D dashboard data populate.
+# alerts, incidents, the 3D dashboard data, and the real-time WebSocket
+# (handshake + live event broadcast) all work.
 #
 # Usage:
 #   scripts/verify_render.sh [BASE_URL] [INGEST_LIMIT]
@@ -28,7 +29,7 @@ say "CyberSentinel-X Render verification"
 echo "Target:      $BASE_URL"
 echo "Ingest limit: $INGEST_LIMIT"
 
-# --- 1. Wait for the site (free tier cold-starts on first request) ----------
+# --- 1. Wait for the site + backend (free tier cold-starts on first request) ---
 say "1. Waiting for the site to come up"
 code=""
 for i in $(seq 1 30); do
@@ -42,6 +43,22 @@ for i in $(seq 1 30); do
 done
 if [ "$code" != "200" ]; then
   echo "FAIL: site never came up (last HTTP ${code:-timeout})"
+  exit 1
+fi
+
+# The frontend can be up while the backend is still booting; the rest of this
+# script needs the backend warm, so wait for /health too.
+for i in $(seq 1 12); do
+  bcode=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "$BASE_URL/health" || true)
+  if [ "$bcode" = "200" ]; then
+    echo "Backend is warm (HTTP $bcode) after ${i} attempts"
+    break
+  fi
+  echo "  backend attempt $i: HTTP ${bcode:-timeout} — waiting 10s..."
+  sleep 10
+done
+if [ "$bcode" != "200" ]; then
+  echo "FAIL: backend never came up (last HTTP ${bcode:-timeout})"
   exit 1
 fi
 
@@ -143,6 +160,72 @@ for EP in threat-space attack-distribution events-timeseries; do
     "import sys,json;d=json.load(sys.stdin);print(len(d) if isinstance(d,list) else len(d.get('points',d.get('series',d.get('data',[])))))" 2>/dev/null || echo "?")
   echo "  $EP: $N points"
 done
+
+# --- 10. WebSocket handshake (catches nginx /ws Host-header 508 loops) -----------------
+say "10. WebSocket handshake via frontend proxy"
+# The backend accepts the connection immediately when a valid token is passed;
+# curl completes the upgrade and reports 101. A 508 here means the /ws proxy
+# forwards the browser Host instead of the upstream host (Render routing loop).
+WS_CODE=$(curl -s --http1.1 -o /dev/null -w "%{http_code}" -m 20 \
+  -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" \
+  -H "Sec-WebSocket-Key: SGVsbG9Xb3JsZDEyMzQ1Ng==" \
+  "$BASE_URL/ws?token=$TOKEN")
+if [ "$WS_CODE" = "101" ]; then
+  echo "  WebSocket upgrade accepted (HTTP 101)"
+else
+  echo "  FAIL: WebSocket handshake returned HTTP $WS_CODE (expected 101)"
+  echo "  Check the nginx /ws proxy: Host must be \$proxy_host, not \$host."
+  exit 1
+fi
+
+# --- 11. Live events stream over WebSocket ----------------------------------------------
+say "11. Live WebSocket stream (simulation -> broadcast)"
+# Uses python3 + the 'websockets' package when available (falls back to the
+# backend venv); skipped gracefully if neither exists. The handshake in step 10
+# is the hard requirement — this step proves realtime delivery end to end.
+PY=$(command -v python3)
+if ! "$PY" -c "import websockets" 2>/dev/null; then
+  if [ -x "backend/.venv/bin/python" ] && backend/.venv/bin/python -c "import websockets" 2>/dev/null; then
+    PY=backend/.venv/bin/python
+  fi
+fi
+WS_HOST=$(printf '%s' "$BASE_URL" | sed -E 's|^https?://||')
+if ! "$PY" -c "import websockets" 2>/dev/null; then
+  echo "  (python 'websockets' package not found — skipping live-stream check; handshake verified above)"
+else
+  "$PY" - "$WS_HOST" "$TOKEN" <<'PY'
+import asyncio, json, sys, urllib.request, websockets
+
+host, token = sys.argv[1], sys.argv[2]
+base = f"https://{host}"
+
+def post(path):
+    req = urllib.request.Request(base + path, data=b"", headers={"Authorization": f"Bearer {token}"}, method="POST")
+    return json.load(urllib.request.urlopen(req, timeout=60))
+
+async def main():
+    counts = {}
+    async with websockets.connect(f"wss://{host}/ws?token={token}", open_timeout=20) as ws:
+        res = post("/api/simulations/brute-force")
+        print("  simulation:", res.get("scenario"), "| events:", res.get("events_ingested"), "| incident:", res.get("incident_id"))
+        try:
+            while True:
+                msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=25))
+                event = msg.get("event")
+                counts[event] = counts.get(event, 0) + 1
+        except asyncio.TimeoutError:
+            pass
+    print("  streamed messages:", sum(counts.values()))
+    for key in sorted(counts):
+        print(f"    {key}: {counts[key]}")
+    if "new_event" not in counts:
+        print("  FAIL: no live events received over the socket")
+        sys.exit(1)
+
+asyncio.run(main())
+PY
+fi
 
 echo
 echo "=============================================================="

@@ -214,7 +214,12 @@ export default function DataSources() {
 
             {isAdmin && (
               <div className="mt-4 flex flex-wrap gap-2">
-                <button className="btn-primary" onClick={startIngest} disabled={ingesting || progress?.running}>
+                <button
+                  className="btn-primary"
+                  onClick={startIngest}
+                  disabled={ingesting || progress?.running || !status?.configured}
+                  title={status?.configured ? undefined : "UNSW-NB15 CSVs are not present on this server — upload a CSV via the Upload Dataset tab instead"}
+                >
                   {ingesting || progress?.running ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                   {progress?.running ? "Ingesting…" : "Ingest UNSW-NB15"}
                 </button>
@@ -227,6 +232,15 @@ export default function DataSources() {
                   {confirmClear ? "Click again to confirm" : "Remove all data"}
                 </button>
               </div>
+            )}
+            {isAdmin && !status?.configured && (
+              <p className="mt-2 text-[11px] text-slate-500">
+                The UNSW-NB15 CSVs aren&apos;t configured on this deployment — upload a CSV from the{" "}
+                <button onClick={() => setTab("upload")} className="text-electric-400 underline hover:text-electric-300">
+                  Upload Dataset
+                </button>{" "}
+                tab instead.
+              </p>
             )}
             {!isAdmin && (
               <p className="mt-3 text-[11px] text-slate-600">ADMIN role required to ingest or clear dataset data.</p>
@@ -288,7 +302,7 @@ export default function DataSources() {
               <EmptyState
                 icon={<HardDrive className="h-8 w-8" />}
                 title="No events ingested yet"
-                description="Click “Ingest UNSW-NB15” to load the real dataset. Detection, alerts and incidents are created automatically."
+                description="Upload a CSV from the Upload Dataset tab to load real traffic — detection, alerts and incidents are created automatically. (The full UNSW-NB15 CSVs are not configured on this deployment.)"
               />
             )}
           </div>

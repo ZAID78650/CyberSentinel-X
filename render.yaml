@@ -1,0 +1,104 @@
+# CyberSentinel X — Render Blueprint
+# One-click deployment of the full stack (Postgres + FastAPI backend + nginx frontend).
+#
+# How to deploy:
+#   1. Push this repo to GitHub (already done).
+#   2. https://render.com → New → Blueprint → connect the GitHub repo
+#      (ZAID78650/CyberSentinel-X). Render reads this render.yaml, creates the
+#      Postgres database and both web services, and wires the environment.
+#   3. First deploy builds both Docker images (backend/ + frontend/), runs
+#      alembic migrations + idempotent seed on startup, and comes up healthy.
+#
+# Optional env vars you may want to set per service:
+#   - UNSW_DATASET_DIR: absolute path to the UNSW-NB15 CSVs inside the disk
+#     (upload CSVs via the Data Sources → Upload tab instead — no env needed).
+#   - SMTP_USER / SMTP_PASSWORD / EMAIL_FROM / OPS_EMAIL for email alerts.
+#   - LLM_PROVIDER=openai|gemini + matching API key, if you want the live LLM
+#     agent instead of the deterministic local provider.
+#
+# Note: free-tier web services spin down after 15 min of inactivity; the
+# Blueprint defaults to free but you can bump plans in the Render dashboard.
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend — FastAPI + uvicorn/gunicorn, Postgres, alembic migrations + seed
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: cybersentinel-backend
+    runtime: docker
+    repo: https://github.com/ZAID78650/CyberSentinel-X
+    plan: free
+    dockerfilePath: backend/Dockerfile
+    # Build context is the repo root (Dockerfiles COPY backend/... and frontend/...)
+    buildCommand: ""  # Dockerfile is self-contained
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cybersentinel-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+      - key: LLM_PROVIDER
+        value: local
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: VECTOR_DB_BACKEND
+        value: local
+      - key: VECTOR_DB_PATH
+        value: /app/data/vector_store
+      - key: CORS_ORIGINS
+        fromService:
+          name: cybersentinel-frontend
+          type: web
+          property: url
+      - key: FRONTEND_URL
+        fromService:
+          name: cybersentinel-frontend
+          type: web
+          property: url
+      - key: UNSW_DATASET_DIR
+        value: ""  # upload datasets via the UI instead
+      - key: UNSW_INGEST_LIMIT
+        value: "0"
+    disk:
+      name: backend-data
+      mountPath: /app/data
+      sizeGB: 1
+    healthCheckPath: /health
+
+  # ---------------------------------------------------------------------------
+  # Frontend — static build served by nginx, proxying /api + /ws to the backend
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: cybersentinel-frontend
+    runtime: docker
+    repo: https://github.com/ZAID78650/CyberSentinel-X
+    plan: free
+    dockerfilePath: frontend/Dockerfile
+    buildCommand: ""  # Dockerfile is self-contained (multi-stage node → nginx)
+    envVars:
+      - key: BACKEND_URL
+        fromService:
+          name: cybersentinel-backend
+          type: web
+          property: url
+    healthCheckPath: /
+
+# ---------------------------------------------------------------------------
+# Managed PostgreSQL
+# ---------------------------------------------------------------------------
+databases:
+  - name: cybersentinel-postgres
+    plan: free
+    databaseName: cybersentinel
+    user: cybersentinel

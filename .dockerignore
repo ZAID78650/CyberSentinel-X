@@ -14,7 +14,9 @@ __pycache__
 .env.*.local
 *.db
 *.sqlite3
-data/
+data/vector_store/
+data/reports/
+data/uploads/
 logs/
 .DS_Store
 .idea/

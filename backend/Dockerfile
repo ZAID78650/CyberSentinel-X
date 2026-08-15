@@ -25,8 +25,7 @@ RUN pip install --upgrade pip setuptools && \
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH=/root/.local/bin:$PATH
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
@@ -38,8 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     addgroup --gid 1000 appuser && \
     adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
 
-# Copy pre-built wheels from builder
-COPY --from=builder /root/.local /root/.local
+# Copy pre-built wheels from builder into the *system* site-packages so the
+# non-root runtime user (appuser) can import them — /root/.local would be
+# unreadable to appuser.
+COPY --from=builder /root/.local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /root/.local/bin /usr/local/bin
 
 # Copy application files
@@ -48,6 +49,8 @@ COPY backend/alembic ./alembic
 COPY backend/app ./app
 COPY backend/scripts ./scripts
 COPY backend/docker-entrypoint.sh /docker-entrypoint.sh
+# RAG knowledge base (resolved as /data/knowledge_base at runtime)
+COPY data/knowledge_base /data/knowledge_base
 
 # Create data directory and set permissions
 RUN mkdir -p /app/data && \

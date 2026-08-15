@@ -7,6 +7,33 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
+The frontend nginx proxies `/api` + `/ws` to the backend through the
+`BACKEND_URL` env var (default `http://backend:8000` for compose). The
+frontend image renders the nginx config at startup via the official nginx
+image's envsubst template mechanism — the same image works on Render with
+`BACKEND_URL` set to the backend's public URL.
+
+## Render (one-click Blueprint deploy)
+
+A `render.yaml` blueprint in the repo root deploys the whole stack
+(managed Postgres + FastAPI backend + nginx frontend) from GitHub:
+
+1. Push this repo to GitHub.
+2. https://render.com → **New → Blueprint** → connect the repo
+   (`ZAID78650/CyberSentinel-X`).
+3. Render creates the Postgres database, both web services, runs alembic
+   migrations + the idempotent seed, and wires the environment
+   (`DATABASE_URL`, `BACKEND_URL`, CORS, JWT secrets).
+4. Open the frontend service URL — login with the seeded admin account.
+
+Notes:
+- Free-tier web services spin down after ~15 min idle; bump plans in the
+  dashboard for an always-on demo.
+- Upload datasets via **Data Sources → Upload Dataset** (persisted to the
+  backend's 1 GB disk at `/app/data`). Set `UNSW_DATASET_DIR` on the
+  backend service if you want direct UNSW file ingestion.
+- Set `SMTP_*` / `LLM_PROVIDER` / API keys on the backend service as needed.
+
 Services:
 
 | Service | Image | Notes |

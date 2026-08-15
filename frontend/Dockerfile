@@ -22,23 +22,22 @@ RUN npm run build
 # Runtime: lightweight nginx with pre-built assets
 FROM nginx:1.27-alpine
 
-# Create non-root user for nginx
-RUN addgroup -g 101 -S nginx && \
-    adduser -S -D -H -u 101 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx 2>/dev/null || true
+# Backend URL the nginx proxy targets. The official nginx image runs
+# envsubst over /etc/nginx/templates/*.template at startup, substituting
+# this value into default.conf.template -> default.conf.
+ARG BACKEND_URL=http://backend:8000
+ENV BACKEND_URL=$BACKEND_URL
 
 # Copy built application
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
-
-# Set proper permissions
-RUN chown -R nginx:nginx /usr/share/nginx/html && \
-    chmod -R 755 /usr/share/nginx/html
+# Template gets envsubst'd into /etc/nginx/conf.d/default.conf by the image
+# entrypoint (needs root to write the generated config; the nginx master then
+# drops to its `user nginx;` workers as configured in the base image).
+COPY frontend/nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -q -O - http://localhost/ || exit 1
-
-USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]

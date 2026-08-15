@@ -231,6 +231,71 @@ class EvidenceService:
         return block
 
     # ------------------------------------------------------------------
+    def commit_campaign_evidence(self, campaign: Dict[str, Any], created_by: str = "evidence-agent") -> Dict[str, Any]:
+        """Anchor a campaign's evidence into its own Merkle-rooted block.
+
+        Per-campaign commitment: the block's meta carries the campaign id, and
+        the Merkle root covers exactly that campaign's evidence record hashes
+        (chain order) — so the UI can show one root per campaign and a judge
+        can verify membership of any individual hash against it.
+        """
+        from app.models.security import Incident
+
+        inc_ids = campaign.get("incidents") or []
+        incidents = list(self.db.scalars(
+            select(Incident).where(Incident.incident_id.in_(inc_ids))
+        ).all())
+        if not incidents:
+            raise ValueError("Campaign has no incidents")
+        incident_uuids = [i.id for i in incidents]
+        records = list(self.db.scalars(
+            select(EvidenceRecord)
+            .where(EvidenceRecord.incident_id.in_(incident_uuids))
+            .order_by(EvidenceRecord.chain_index)
+        ).all())
+        if not records:
+            raise ValueError("No evidence records for this campaign")
+
+        last = _last_block(self.db)
+        block_index = (last.block_index + 1) if last else 0
+        prev_block_hash = last.block_hash if last else GENESIS_HASH
+        hashes = [r.record_hash for r in records]
+        records_digest = sha256(canonical({"hashes": hashes}))
+        mroot = merkle_root(hashes)
+        nonce = mine_nonce(block_index, prev_block_hash, records_digest)
+        block_hash = compute_block_hash(block_index, prev_block_hash, records_digest, nonce)
+
+        block = LedgerBlock(
+            block_index=block_index,
+            prev_block_hash=prev_block_hash,
+            records_digest=records_digest,
+            merkle_root=mroot,
+            nonce=nonce,
+            block_hash=block_hash,
+            record_count=len(records),
+            mined_at=datetime.now(timezone.utc),
+            meta={"campaign_id": campaign.get("campaign_id"), "campaign_commit": True,
+                  "evidence_ids": [r.evidence_id for r in records],
+                  "last_chain_index": records[-1].chain_index,
+                  "difficulty": POW_DIFFICULTY},
+        )
+        self.db.add(block)
+        self.db.commit()
+        self.db.refresh(block)
+        log_action(self.db, actor=created_by, action="EVIDENCE.CAMPAIGN_COMMIT",
+                   target_type="campaign", target_id=campaign.get("campaign_id"),
+                   detail={"block_index": block_index, "merkle_root": mroot[:12], "records": len(records)})
+        return {
+            "campaign_id": campaign.get("campaign_id"),
+            "block_index": block.block_index,
+            "block_hash": block.block_hash,
+            "merkle_root": block.merkle_root,
+            "nonce": block.nonce,
+            "evidence_count": len(records),
+            "evidence_ids": [r.evidence_id for r in records],
+        }
+
+    # ------------------------------------------------------------------
     def backfill_merkle_roots(self, created_by: str = "evidence-agent") -> Dict[str, Any]:
         """Compute Merkle roots for blocks mined before the tree was introduced.
 

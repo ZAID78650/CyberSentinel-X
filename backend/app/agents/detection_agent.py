@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 from app.agents.base_agent import BaseAgent
 from app.models.security import SecurityEvent
 from app.services.alert_service import create_alert_from_events, create_incident_from_alert
+from app.services.feedback import BASE_DETECTION_FLOOR, load_correlation_floors
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,17 @@ class DetectionAgent(BaseAgent):
     name = "detection"
 
     def evaluate_batch(self, events: List[SecurityEvent], actor: str = "detection-agent") -> Dict[str, Any]:
-        """Analyze a batch of freshly ingested events; create alert + incident if warranted."""
-        suspicious = [e for e in events if e.is_anomalous or (e.anomaly_score or 0) >= 0.55]
+        """Analyze a batch of freshly ingested events; create alert + incident if warranted.
+
+        The anomaly floor per event type is read from the audited correlation
+        settings (set via retrain-with-consent); a raised floor means fewer
+        alerts for a category analysts have shown to be noisy.
+        """
+        floors = load_correlation_floors(self.db)
+        suspicious = [
+            e for e in events
+            if e.is_anomalous or (e.anomaly_score or 0) >= BASE_DETECTION_FLOOR + floors.get(e.event_type, 0.0)
+        ]
         if not suspicious:
             return {"alert": None, "incident": None, "suspicious_count": 0}
 

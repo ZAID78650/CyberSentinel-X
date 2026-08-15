@@ -115,6 +115,25 @@ async def mine(
     }
 
 
+@router.post("/campaign/{campaign_id}/commit")
+def commit_campaign_evidence(
+    campaign_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("ADMIN", "SECURITY_ANALYST")),
+):
+    """Anchor a campaign's evidence into its own Merkle-rooted block."""
+    from app.services.campaign_intel import campaign_from_id
+
+    campaign = campaign_from_id(db, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+    try:
+        result = EvidenceService(db).commit_campaign_evidence(campaign, created_by=user.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result
+
+
 @router.post("/ledger/backfill-merkle")
 def backfill_merkle(
     db: Session = Depends(get_db),

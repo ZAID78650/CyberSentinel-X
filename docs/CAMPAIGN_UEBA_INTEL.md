@@ -123,6 +123,23 @@ incident id (`INC-...`).
   impact, momentum signals, timeline, mutation watch), Similarity, Prediction,
   Blast Radius, Response, Evidence & Blockchain.
 
+### Round 2 — command center, per-campaign evidence, retrain-with-consent
+- `GET /api/campaigns/command-center` — summary cards (active/critical/escalating/
+  predicted/contained) + full table rows with momentum/velocity/status/confidence/
+  assets/prediction in one TTL-cached call. `/api/campaigns/{id}/intel` now also
+  returns `status`, `confidence`, `asset_count` and `prediction` extras.
+- `POST /api/evidence/campaign/{campaign_id}/commit` — anchors a campaign's
+  evidence into its own Merkle-rooted block (`campaign_id` + `campaign_commit` in
+  block meta). The command center's Evidence tab shows the per-campaign root.
+- `POST /api/analytics/feedback/retrain` (admin) — retrain correlation **with
+  consent**: FP-heavy categories (FPR > 0.5, ≥2 labels) get `+0.15` on the
+  Detection Agent's anomaly floor; clean categories (precision ≥ 0.8) get `-0.05`.
+  Every change is audited (`CORRELATION.RETRAINED`), surfaced in
+  `feedback-stats.applied_settings`, and reversible. Nothing is applied silently.
+- **WebSocket**: `analyst_feedback` events broadcast on label submission; the
+  Alerts page refreshes stats live and the Campaigns command center refreshes on
+  `new_alert` / `new_incident` / `incident_updated` — no polling.
+
 A timed 5-minute judge script is in [SIH_DEMO.md](SIH_DEMO.md).
 
 ## Testing

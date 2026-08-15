@@ -9,12 +9,28 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import Float, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
 FEEDBACK_LABELS = ["TRUE_POSITIVE", "FALSE_POSITIVE", "BENIGN", "UNKNOWN"]
+
+
+class CorrelationSetting(Base, TimestampMixin):
+    """An explicit, audited correlation-threshold adjustment per alert category.
+
+    Set only through the retrain-with-consent endpoint; never modified
+    silently. The Detection Agent reads these when scoring new events.
+    """
+
+    __tablename__ = "correlation_settings"
+
+    category: Mapped[str] = mapped_column(String(64), primary_key=True, nullable=False)
+    base_floor: Mapped[float] = mapped_column(Float, default=0.55, nullable=False)
+    floor_adjustment: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    applied_by: Mapped[str] = mapped_column(String(128), nullable=False)
 
 
 class AnalystFeedback(Base, UUIDMixin, TimestampMixin):

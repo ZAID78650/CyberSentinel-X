@@ -164,3 +164,34 @@ def test_business_impact_qualitative(db_session):
     assert "FIN-DB" in bi["critical_assets"]
     assert "FIN-DB" in bi["sensitive_data_stores"]
     assert bi["evidence"]
+
+
+def test_command_center_rows_and_summary(db_session):
+    inc = _incident(db_session, severity="CRITICAL")
+    _event(db_session, inc, "LOGIN_FAILURE", minutes=1, severity="HIGH")
+    _event(db_session, inc, "DATA_EXFILTRATION", minutes=5, severity="CRITICAL", asset="FIN-DB")
+    cc = ci.command_center(db_session, limit=50)
+    assert "summary" in cc and "campaigns" in cc and "funnel" in cc
+    for key in ("active", "critical", "escalating", "predicted", "contained", "total"):
+        assert key in cc["summary"]
+    assert cc["summary"]["total"] >= 1
+    for row in cc["campaigns"]:
+        for key in ("campaign_id", "category", "severity", "risk_score", "confidence",
+                    "event_count", "incident_count", "asset_count", "techniques", "status",
+                    "momentum", "momentum_status", "velocity", "velocity_band",
+                    "escalation_detected", "prediction"):
+            assert key in row
+        assert isinstance(row["asset_count"], int)
+    # The FIN-DB asset from the exfiltration event shows up in some campaign row.
+    assert any(r["asset_count"] >= 1 for r in cc["campaigns"])
+
+
+def test_campaign_extras_prediction_and_status(db_session):
+    inc = _incident(db_session)
+    _event(db_session, inc, "LOGIN_FAILURE", minutes=1, severity="HIGH")
+    camp = ci.campaign_from_id(db_session, inc.incident_id)
+    extras = ci.campaign_extras(db_session, camp)
+    assert extras["status"] == "ACTIVE"  # incident OPEN
+    assert extras["confidence"] > 0
+    assert extras["prediction"] in (None, dict)
+    assert isinstance(extras["asset_count"], int)

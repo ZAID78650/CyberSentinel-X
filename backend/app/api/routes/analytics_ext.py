@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
 from app.core.database import get_db
 from app.models.user import User
 from app.services import data_quality, feedback, judge
@@ -23,6 +23,16 @@ def drift(db: Session = Depends(get_db), _user: User = Depends(get_current_user)
 @router.get("/feedback-stats")
 def feedback_stats(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     return feedback.feedback_stats(db)
+
+
+@router.post("/feedback/retrain")
+def retrain_correlation(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("ADMIN")),
+):
+    """Retrain correlation with consent: apply audited threshold adjustments
+    derived from analyst feedback. Nothing is applied silently."""
+    return feedback.apply_suggestions(db, user.email)
 
 
 @router.get("/judge-mode")

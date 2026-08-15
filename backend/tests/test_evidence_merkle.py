@@ -1,7 +1,8 @@
 """Tests for the Merkle tree root and its integration with ledger blocks."""
 from sqlalchemy import select
 
-from app.models.forensics import EvidenceRecord
+from app.models.forensics import EvidenceRecord, LedgerBlock
+from app.models.security import Incident
 from app.services.evidence import EvidenceService, merkle_root, sha256
 
 
@@ -71,6 +72,37 @@ def test_backfill_merkle_roots_for_pre_merkle_blocks(db_session):
 
     report = svc.verify_chain()
     assert report["merkle_roots_valid"] >= 1
+    assert report["integrity"] == "VALID"
+
+
+def test_commit_campaign_evidence(db_session):
+    """A campaign's evidence is anchored into its own Merkle-rooted block."""
+    svc = EvidenceService(db_session)
+    incident = Incident(
+        incident_id="INC-CAMPAIGN-COMMIT", title="commit test", severity="HIGH",
+        status="OPEN", confidence=0.9, risk_score=70.0, risk_label="HIGH", category="PORT_SCAN",
+        created_by="test",
+    )
+    db_session.add(incident)
+    db_session.commit()
+    recs = []
+    for i in range(3):
+        recs.append(svc.create_evidence(
+            incident_id=incident.id, evidence_type="TEST",
+            title=f"campaign ev {i}", description="payload",
+            payload={"i": i}, data_source="TEST",
+        ))
+    campaign = {"campaign_id": "CGN-TEST", "incidents": [incident.incident_id]}
+    result = svc.commit_campaign_evidence(campaign, created_by="test")
+    assert result["campaign_id"] == "CGN-TEST"
+    assert result["evidence_count"] == 3
+    assert len(result["merkle_root"]) == 64
+    block = db_session.scalar(select(LedgerBlock).where(LedgerBlock.block_index == result["block_index"]))
+    assert (block.meta or {}).get("campaign_id") == "CGN-TEST"
+    assert (block.meta or {}).get("campaign_commit") is True
+    expected = merkle_root([r.record_hash for r in recs])
+    assert block.merkle_root == expected
+    report = svc.verify_chain()
     assert report["integrity"] == "VALID"
 
 

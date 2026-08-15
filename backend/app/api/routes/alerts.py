@@ -57,7 +57,7 @@ class FeedbackIn(BaseModel):
 
 
 @router.post("/{alert_id}/feedback")
-def submit_feedback(
+async def submit_feedback(
     alert_id: UUID,
     body: FeedbackIn,
     db: Session = Depends(get_db),
@@ -70,4 +70,8 @@ def submit_feedback(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from app.core.websocket_manager import ws_manager
+    await ws_manager.broadcast("analyst_feedback", {
+        "alert_id": str(alert_id), "label": fb.label, "analyst": fb.analyst,
+    })
     return {"alert_id": str(alert_id), "label": fb.label, "analyst": fb.analyst, "created_at": fb.created_at.isoformat()}

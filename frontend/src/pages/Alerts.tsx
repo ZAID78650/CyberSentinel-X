@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ThumbsDown, ThumbsUp } from "lucide-react";
+import { AlertTriangle, RotateCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { api } from "../services/api";
 import { Card, EmptyState, SeverityBadge, Skeleton, StatCard, StatusBadge } from "../components/ui";
+import { useAuth } from "../contexts/AuthContext";
+import { useWebSocket } from "../hooks/useWebSocket";
 import type { Alert, Paginated } from "../types";
 
 type FeedbackLabel = "TRUE_POSITIVE" | "FALSE_POSITIVE" | "BENIGN" | "UNKNOWN";
@@ -15,7 +17,14 @@ interface FeedbackStats {
   label_counts: Record<string, number>;
   false_positive_rate: number | null;
   precision: number | null;
+  category_stats: Array<{ category: string; total: number; true_positive: number; false_positive: number; benign: number; precision: number | null; false_positive_rate: number | null; suggestion: string | null }>;
+  applied_settings: Array<{ category: string; base_floor: number; floor_adjustment: number; effective_floor: number; applied_by: string; rationale: string | null }>;
   provenance: { mode: string; basis: string };
+}
+
+interface RetrainResult {
+  applied: Array<{ category: string; action: string; old_floor: number; new_floor: number; rationale: string }>;
+  note: string;
 }
 
 const LABEL_BTNS: Array<{ label: FeedbackLabel; cls: string }> = [
@@ -28,7 +37,15 @@ export default function Alerts() {
   const [page, setPage] = useState(1);
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
+  const [retrainResult, setRetrainResult] = useState<RetrainResult | null>(null);
   const queryClient = useQueryClient();
+  const { hasRole } = useAuth();
+  const { on } = useWebSocket();
+
+  // Live: another analyst's label refreshes the stats over the socket.
+  useEffect(() => {
+    return on("analyst_feedback", () => queryClient.invalidateQueries({ queryKey: ["feedback-stats"] }));
+  }, [on, queryClient]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["alerts", page, severity, status],
@@ -49,6 +66,14 @@ export default function Alerts() {
     mutationFn: async ({ alertId, label }: { alertId: string; label: FeedbackLabel }) =>
       (await api.post(`/alerts/${alertId}/feedback`, { label })).data,
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["feedback-stats"] });
+    },
+  });
+
+  const retrain = useMutation({
+    mutationFn: async () => (await api.post<RetrainResult>("/analytics/feedback/retrain")).data,
+    onSuccess: (res) => {
+      setRetrainResult(res);
       queryClient.invalidateQueries({ queryKey: ["feedback-stats"] });
     },
   });
@@ -76,6 +101,44 @@ export default function Alerts() {
           <StatCard label="Observed precision" value={pct(stats.precision)} color="#34d399" hint="TP / (TP + FP) on labeled alerts" />
           <StatCard label="False-positive rate" value={pct(stats.false_positive_rate)} color={stats.false_positive_rate !== null && stats.false_positive_rate > 0.3 ? "#f87171" : "#34d399"} hint={`${stats.labeled_alerts} alerts labeled · ${stats.provenance.mode}`} />
         </div>
+      )}
+
+      {stats && (stats.applied_settings?.length > 0 || (hasRole("ADMIN") && stats.category_stats?.some((c) => c.suggestion))) && (
+        <Card title="Correlation tuning — with consent" subtitle="Adjustments are proposed from feedback, applied only by an admin, and audited.">
+          <div className="space-y-2">
+            {stats.applied_settings.map((s) => (
+              <div key={s.category} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-night-700 bg-night-850/60 px-3 py-2 text-xs">
+                <div>
+                  <span className="font-mono font-bold text-slate-200">{s.category}</span>
+                  <span className="ml-2 text-slate-500">floor {(s.effective_floor).toFixed(2)}{s.floor_adjustment > 0 ? " (raised)" : s.floor_adjustment < 0 ? " (lowered)" : ""}</span>
+                  {s.rationale && <span className="ml-2 text-slate-600">— {s.rationale}</span>}
+                </div>
+                <span className="font-mono text-[10px] text-slate-600">by {s.applied_by}</span>
+              </div>
+            ))}
+            {hasRole("ADMIN") && (
+              <div className="flex items-center justify-between border-t border-night-800/70 pt-3">
+                <p className="text-[11px] text-slate-500">Apply suggestions from analyst feedback (raises noisy categories' detection floor, lowers clean ones).</p>
+                <button className="btn-primary" disabled={retrain.isPending} onClick={() => retrain.mutate()}>
+                  <RotateCw className={`h-4 w-4 ${retrain.isPending ? "animate-spin" : ""}`} />
+                  Retrain correlation
+                </button>
+              </div>
+            )}
+            {retrainResult && (
+              <div className="rounded-lg border border-cyber-green/30 bg-cyber-green/5 p-3 text-xs">
+                <p className="font-semibold text-cyber-green">Applied {retrainResult.applied.length} adjustment(s)</p>
+                {retrainResult.applied.length === 0 && <p className="mt-1 text-slate-400">No category met the retrain criteria (≥2 labels with FPR &gt; 50% or precision ≥ 80%).</p>}
+                {retrainResult.applied.map((c) => (
+                  <p key={c.category} className="mt-1 font-mono text-slate-300">
+                    {c.category}: floor {c.old_floor.toFixed(2)} → {c.new_floor.toFixed(2)} ({c.action})
+                  </p>
+                ))}
+                <p className="mt-2 text-[11px] text-slate-500">{retrainResult.note}</p>
+              </div>
+            )}
+          </div>
+        </Card>
       )}
 
       <Card

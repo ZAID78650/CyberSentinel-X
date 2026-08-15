@@ -47,8 +47,10 @@ labeled `MODEL PREDICTION`.
 
 ## 1:15–2:30 · Campaign command center
 
-8. Open **Campaigns**. The alert-fatigue funnel shows the correlation
-   collapse (events → alerts → incidents → campaigns).
+8. Open **Campaigns** — the command center: summary cards (active/critical/
+   escalating/predicted/contained) and the full table (risk, confidence,
+   momentum, velocity, prediction, status). Rows update live over the socket
+   as new correlated state lands.
 9. Click the campaign the scenario produced → **command center**:
    - **Overview**: Attack DNA fingerprint + family + confidence; business
      impact; momentum signals; attack timeline (stage transition minutes).
@@ -67,6 +69,8 @@ labeled `MODEL PREDICTION`.
     path, computed by graph reachability.
 11. Open the **Response** tab — recommendations with impact ratings; none
     execute without approval (see **Human Approvals**).
+12. (If time) Evidence tab → **Commit campaign evidence** — one Merkle-rooted
+    block per campaign: `block #N · M evidence records · Merkle root …`
 
 > Talk track: *"The platform recommends; a human decides. Every action is
 > audited in the Actions Log."*
@@ -87,7 +91,8 @@ labeled `MODEL PREDICTION`.
 15. **Threat Intelligence** → the feed-status card honestly states
     **NO LIVE THREAT INTELLIGENCE SOURCE CONFIGURED** (local feed only).
 16. **Alerts** → mark an alert **FP** or **TP**; the feedback cards update
-    precision / false-positive rate.
+    precision / false-positive rate over the socket. As admin, **Retrain
+    correlation** — the floor change appears with before/after and audit.
 
 ## 4:45–5:00 · Close
 

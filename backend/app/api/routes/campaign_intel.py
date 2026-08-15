@@ -51,11 +51,23 @@ def business_impact(campaign_id: str, db: Session = Depends(get_db), _user: User
 
 @router.get("/{campaign_id}/intel")
 def campaign_intel_summary(campaign_id: str, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
-    """Combined velocity + momentum + MITRE coverage for the command center."""
+    """Combined velocity + momentum + MITRE coverage + status/prediction extras."""
     campaign = _resolve(db, campaign_id)
     return {
         "campaign_id": campaign_id,
         "velocity": ci.attack_velocity(db, campaign),
         "momentum": ci.campaign_momentum(db, campaign),
         "mitre_coverage": ci.mitre_coverage(db, campaign),
+        **ci.campaign_extras(db, campaign),
     }
+
+
+@router.get("/command-center")
+def command_center(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Command-center payload: summary cards + full table rows with intel."""
+    from app.services.cache import get_or_build
+    return get_or_build(f"command-center:{limit}", 20.0, lambda: ci.command_center(db, limit=limit))

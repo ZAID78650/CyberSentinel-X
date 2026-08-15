@@ -13,11 +13,26 @@ from uuid import UUID
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.models.feedback import AnalystFeedback
+from app.models.feedback import AnalystFeedback, CorrelationSetting
 from app.models.investigation import ActionLog
 from app.models.security import Alert, SecurityEvent
 
 LABELS = ["TRUE_POSITIVE", "FALSE_POSITIVE", "BENIGN", "UNKNOWN"]
+
+# Base anomaly-score floor used by the Detection Agent to flag events.
+BASE_DETECTION_FLOOR = 0.55
+
+# Retrain rules (visible, explainable — never a black box).
+RAISE_STEP = 0.15   # noisy category: raise the floor by this much
+LOWER_STEP = 0.05   # clean category: lower the floor by this much
+FPR_NOISE = 0.5     # FP rate above this (with >=2 labels) triggers a raise
+PRECISION_CLEAN = 0.8  # precision at/above this (with low FPR) triggers a lower
+
+
+def load_correlation_floors(db: Session) -> Dict[str, float]:
+    """event_type -> floor adjustment, for the Detection Agent's scoring."""
+    rows = db.scalars(select(CorrelationSetting)).all()
+    return {r.category: r.floor_adjustment for r in rows}
 
 
 def submit_feedback(db: Session, alert_id: UUID, label: str, analyst: str, note: Optional[str] = None) -> AnalystFeedback:
@@ -112,6 +127,14 @@ def feedback_stats(db: Session) -> Dict[str, Any]:
         elif lbl == "BENIGN":
             row["benign"] += 1
 
+    applied_settings: List[Dict[str, Any]] = [
+        {"category": r.category, "base_floor": r.base_floor,
+         "floor_adjustment": r.floor_adjustment,
+         "effective_floor": round(r.base_floor + r.floor_adjustment, 3),
+         "applied_by": r.applied_by, "rationale": r.rationale}
+        for r in db.scalars(select(CorrelationSetting).order_by(CorrelationSetting.category)).all()
+    ]
+
     category_stats: List[Dict[str, Any]] = []
     for cat, row in sorted(by_category.items(), key=lambda kv: -kv[1]["total"]):
         decisive = row["true_positive"] + row["false_positive"]
@@ -139,8 +162,59 @@ def feedback_stats(db: Session) -> Dict[str, Any]:
         "false_positive_rate": fpr,          # FP / (TP + FP) — observed on labeled alerts
         "precision": precision,              # TP / (TP + FP)
         "category_stats": category_stats,    # per-category precision/FPR + plain-language suggestions
+        "applied_settings": applied_settings,  # explicit, audited threshold adjustments
         "provenance": {
             "mode": "ANALYST FEEDBACK",
             "basis": "labels stored in analyst_feedback; signals = anomalous events before correlation",
         },
+    }
+
+
+def apply_suggestions(db: Session, analyst: str) -> Dict[str, Any]:
+    """Retrain correlation with consent: apply per-category floor adjustments
+    derived from analyst feedback, record before/after, and audit every change.
+
+    Returns the applied changes; nothing is applied silently and nothing
+    requires more than an explicit admin call.
+    """
+    stats = feedback_stats(db)
+    changes: List[Dict[str, Any]] = []
+    for row in stats["category_stats"]:
+        if row["total"] < 2:
+            continue
+        fpr = row["false_positive_rate"]
+        prec = row["precision"]
+        if fpr is not None and fpr > FPR_NOISE:
+            action, adj = "raise", RAISE_STEP
+        elif prec is not None and prec >= PRECISION_CLEAN and (fpr or 0) <= 0.3:
+            action, adj = "lower", -LOWER_STEP
+        else:
+            continue
+        setting = db.get(CorrelationSetting, row["category"])
+        before = setting.floor_adjustment if setting else 0.0
+        if setting is None:
+            setting = CorrelationSetting(
+                category=row["category"], base_floor=BASE_DETECTION_FLOOR,
+                floor_adjustment=adj, applied_by=analyst, rationale=row["suggestion"],
+            )
+            db.add(setting)
+        else:
+            setting.floor_adjustment = adj
+            setting.applied_by = analyst
+            setting.rationale = row["suggestion"]
+        changes.append({
+            "category": row["category"], "action": action,
+            "old_adjustment": before, "new_adjustment": adj,
+            "old_floor": round(BASE_DETECTION_FLOOR + before, 3),
+            "new_floor": round(BASE_DETECTION_FLOOR + adj, 3),
+            "rationale": row["suggestion"],
+        })
+    db.commit()
+    for c in changes:
+        db.add(ActionLog(actor=analyst, action="CORRELATION.RETRAINED",
+                         target_type="category", target_id=c["category"], detail=c))
+    db.commit()
+    return {
+        "applied": changes,
+        "note": "Threshold adjustments apply to the Detection Agent's anomaly floor on the next evaluation. Every change is logged and audited.",
     }

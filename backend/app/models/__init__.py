@@ -28,7 +28,7 @@ from app.models.investigation import (
     ResponseRecommendation,
     RiskScore,
 )
-from app.models.feedback import AnalystFeedback
+from app.models.feedback import AnalystFeedback, CorrelationSetting
 from app.models.forensics import (
     AttackDna,
     AttackPrediction,
@@ -72,4 +72,5 @@ __all__ = [
     "AttackDna",
     "AttackPrediction",
     "AnalystFeedback",
+    "CorrelationSetting",
 ]

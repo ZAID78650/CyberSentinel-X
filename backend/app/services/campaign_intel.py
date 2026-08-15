@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.forensics import AttackPrediction
 from app.models.intel import IncidentMitreMapping, MitreTechnique
 from app.models.security import Asset, Incident, IncidentEvent, SecurityEvent
 from app.services.prediction import STAGE_EVENT_MAP
@@ -124,6 +125,100 @@ def _campaign_techniques(db: Session, campaign: Dict[str, Any]) -> Set[str]:
             select(IncidentMitreMapping.technique_id).where(IncidentMitreMapping.incident_id == inc.id)
         ).all())
     return out
+
+
+def campaign_extras(db: Session, campaign: Dict[str, Any]) -> Dict[str, Any]:
+    """Cheap command-center fields for a campaign: status, confidence, asset
+    count and the latest next-stage prediction for its primary incident."""
+    incidents = _campaign_incidents(db, campaign)
+    if not incidents:
+        return {"status": "ACTIVE", "confidence": 0.0, "asset_count": 0, "prediction": None}
+    if all(i.status in ("CONTAINED", "RESOLVED", "CLOSED") for i in incidents):
+        status = "CONTAINED" if any(i.status == "CONTAINED" for i in incidents) else "CLOSED"
+    else:
+        status = "ACTIVE"
+    confidence = round(sum(i.confidence or 0.0 for i in incidents) / len(incidents), 3)
+    eids = list(db.scalars(
+        select(IncidentEvent.event_id).where(IncidentEvent.incident_id.in_([i.id for i in incidents]))
+    ).all())
+    assets: set = set()
+    if eids:
+        assets = set(db.scalars(
+            select(SecurityEvent.asset_id)
+            .where(SecurityEvent.event_id.in_(eids[:1000]), SecurityEvent.asset_id.is_not(None))
+        ).all())
+    prediction = None
+    first = incidents[0]
+    p = db.scalar(
+        select(AttackPrediction)
+        .where(AttackPrediction.incident_id == first.id)
+        .order_by(AttackPrediction.created_at.desc())
+        .limit(1)
+    )
+    if p is not None:
+        prediction = {
+            "current_stage": p.current_stage,
+            "predicted_stage": p.predicted_stage,
+            "probability": p.probability,
+            "confidence": p.confidence,
+        }
+    return {"status": status, "confidence": confidence, "asset_count": len(assets), "prediction": prediction}
+
+
+def command_center(db: Session, limit: int = 50) -> Dict[str, Any]:
+    """Full command-center payload: summary cards + table rows with intel."""
+    data = compute_campaigns(db, limit=limit)
+    rows = []
+    active = critical = contained = 0
+    escalating_ids: set = set()
+    predicted_ids: set = set()
+    for c in data["campaigns"]:
+        extras = campaign_extras(db, c)
+        vel = attack_velocity(db, c)
+        mom = campaign_momentum(db, c)
+        row = {
+            "campaign_id": c["campaign_id"],
+            "category": c["category"],
+            "severity": c["severity"],
+            "risk_score": c["risk_score"],
+            "confidence": extras["confidence"],
+            "event_count": c["event_count"],
+            "incident_count": c["incident_count"],
+            "asset_count": extras["asset_count"],
+            "techniques": c["techniques"],
+            "status": extras["status"],
+            "momentum": mom.get("momentum", 0.0),
+            "momentum_status": mom.get("status", "STABLE"),
+            "velocity": vel.get("attack_velocity", 0.0),
+            "velocity_band": vel.get("band", "LOW"),
+            "escalation_detected": bool(vel.get("campaign_escalation_detected")),
+            "prediction": extras["prediction"],
+        }
+        rows.append(row)
+        if extras["status"] == "ACTIVE":
+            active += 1
+        elif extras["status"] == "CONTAINED":
+            contained += 1
+        if c["severity"] == "CRITICAL":
+            critical += 1
+        if mom.get("status") == "ESCALATING":
+            escalating_ids.add(c["campaign_id"])
+        if extras["prediction"] is not None:
+            predicted_ids.add(c["campaign_id"])
+    rows.sort(key=lambda r: (-(r["momentum"] if r["momentum_status"] == "ESCALATING" else 0), r["risk_score"]), reverse=True)
+    return {
+        "summary": {
+            "active": active,
+            "critical": critical,
+            "escalating": len(escalating_ids),
+            "predicted": len(predicted_ids),
+            "contained": contained,
+            "total": len(rows),
+        },
+        "campaigns": rows,
+        "funnel": data["funnel"],
+        "note": data.get("note", ""),
+    }
 
 
 def _jaccard(a: Set[Any], b: Set[Any]) -> float:

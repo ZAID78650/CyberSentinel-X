@@ -1,189 +1,173 @@
 import { useEffect, useState } from "react";
-import { Link2, Radar, Target } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { Activity, Radar, Siren, Target, TrendingUp } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
-import { Card, EmptyState, Skeleton } from "../components/ui";
+import { Card, EmptyState, SeverityBadge, Skeleton, StatusBadge } from "../components/ui";
 import ProvenanceBadge from "../components/ui/ProvenanceBadge";
-import type { Campaign, CampaignsResponse } from "../types";
+import { useWebSocket } from "../hooks/useWebSocket";
 
-function shortId(s: string): string {
-  return s.length > 12 ? `${s.slice(0, 12)}…` : s;
+interface CommandRow {
+  campaign_id: string;
+  category: string;
+  severity: string;
+  risk_score: number;
+  confidence: number;
+  event_count: number;
+  incident_count: number;
+  asset_count: number;
+  techniques: string[];
+  status: string;
+  momentum: number;
+  momentum_status: string;
+  velocity: number;
+  velocity_band: string;
+  escalation_detected: boolean;
+  prediction: { current_stage: string; predicted_stage: string; probability: number } | null;
 }
 
-interface CampaignIntel {
-  velocity: { band: string; attack_velocity: number; campaign_escalation_detected: boolean };
-  momentum: { momentum: number; status: string };
-  mitre_coverage: { overall_coverage: number };
+interface CommandCenter {
+  summary: { active: number; critical: number; escalating: number; predicted: number; contained: number; total: number };
+  campaigns: CommandRow[];
+  funnel: { events: number; alerts: number; incidents: number; campaigns: number; dedup_ratio: number };
+  note: string;
 }
 
-function useCampaignIntel(campaignId: string): CampaignIntel | null {
-  const [intel, setIntel] = useState<CampaignIntel | null>(null);
-  useEffect(() => {
-    let alive = true;
-    api.get<CampaignIntel>(`/campaigns/${campaignId}/intel`)
-      .then((res) => { if (alive) setIntel(res.data); })
-      .catch(() => { if (alive) setIntel(null); });
-    return () => { alive = false; };
-  }, [campaignId]);
-  return intel;
+function sevColor(sev: string) {
+  return sev === "CRITICAL" ? "#f87171" : sev === "HIGH" ? "#fb923c" : sev === "MEDIUM" ? "#facc15" : "#4ade80";
 }
 
-const VELOCITY_COLORS: Record<string, string> = {
-  LOW: "#4ade80", MEDIUM: "#facc15", HIGH: "#fb923c", CRITICAL: "#f87171",
-};
-
-function IntelBadge({ label, value, color }: { label: string; value: string; color?: string }) {
+function SummaryCard({ label, value, color, icon }: { label: string; value: number; color: string; icon: React.ReactNode }) {
   return (
-    <span className="flex items-center gap-1 rounded bg-night-850/70 px-1.5 py-0.5 text-[9px] text-slate-400">
-      <span className="uppercase tracking-wide text-slate-600">{label}</span>
-      <b style={{ color }}>{value}</b>
-    </span>
+    <div className="glass glass-hover relative overflow-hidden p-4">
+      <div className="absolute inset-x-0 top-0 h-0.5" style={{ background: color, boxShadow: `0 0 12px ${color}` }} />
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+        <span style={{ color }}>{icon}</span>
+      </div>
+      <p className="mt-1.5 font-mono text-3xl font-black" style={{ color }}>{value}</p>
+    </div>
   );
 }
 
 export default function Campaigns() {
-  const [data, setData] = useState<CampaignsResponse | null>(null);
+  const navigate = useNavigate();
+  const { on } = useWebSocket();
+  const [data, setData] = useState<CommandCenter | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get<CampaignsResponse>("/soc/campaigns?limit=50");
-        setData(res.data);
-      } catch (err) {
-        setError(getErrorMessage(err));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const load = async () => {
+    try {
+      const res = await api.get<CommandCenter>("/campaigns/command-center?limit=50");
+      setData(res.data);
+      setError(null);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  if (loading) {
+  useEffect(() => {
+    void load();
+    // Live: refetch when the detection pipeline produces new correlated state.
+    const unsubs = ["new_alert", "new_incident", "incident_updated", "analyst_feedback"].map((ev) =>
+      on(ev, () => void load())
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [on]);
+
+  if (loading && !data) {
     return (
       <div className="space-y-5">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
         </div>
-        <Skeleton className="h-80" />
+        <Skeleton className="h-96" />
       </div>
     );
   }
 
+  const s = data?.summary;
   const funnel = data?.funnel;
 
   return (
     <div className="space-y-5">
-      {/* Funnel */}
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-lg font-bold text-slate-100">Campaign Command Center</h2>
+        <ProvenanceBadge source="DATASET" />
+        <span className="badge border border-night-700 text-slate-500">live updates via WebSocket</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+        <SummaryCard label="Active campaigns" value={s?.active ?? 0} color="#38bdf8" icon={<Radar className="h-4 w-4" />} />
+        <SummaryCard label="Critical campaigns" value={s?.critical ?? 0} color="#f87171" icon={<Siren className="h-4 w-4" />} />
+        <SummaryCard label="Escalating campaigns" value={s?.escalating ?? 0} color="#fb923c" icon={<TrendingUp className="h-4 w-4" />} />
+        <SummaryCard label="Predicted campaigns" value={s?.predicted ?? 0} color="#c084fc" icon={<Target className="h-4 w-4" />} />
+        <SummaryCard label="Campaigns contained" value={s?.contained ?? 0} color="#4ade80" icon={<Activity className="h-4 w-4" />} />
+      </div>
+
       <Card
-        title="Alert Fatigue Funnel"
-        subtitle="How correlation collapses raw events into a manageable incident list"
+        title={`Attack Campaigns (${data?.campaigns.length ?? 0})`}
+        subtitle={`${funnel?.events ?? 0} events → ${funnel?.alerts ?? 0} alerts → ${funnel?.incidents ?? 0} incidents → ${funnel?.campaigns ?? 0} campaigns (dedup ratio ${funnel?.dedup_ratio ?? 0})`}
         actions={<ProvenanceBadge source="DATASET" />}
       >
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          <FunnelBox label="Events" value={funnel?.events ?? 0} color="#38bdf8" />
-          <FunnelBox label="Alerts" value={funnel?.alerts ?? 0} color="#a78bfa" />
-          <FunnelBox label="Incidents" value={funnel?.incidents ?? 0} color="#facc15" />
-          <FunnelBox label="Campaigns" value={funnel?.campaigns ?? 0} color="#4ade80" />
-          <FunnelBox label="Dedup ratio" value={funnel?.dedup_ratio ?? 0} color="#f87171" hint="events per alert" />
-        </div>
-        <p className="mt-4 rounded-lg border border-night-700 bg-night-850/60 p-3 text-[11px] leading-relaxed text-slate-400">
-          {data?.note}
-        </p>
-      </Card>
-
-      {/* Campaign list */}
-      <Card title="Attack Campaigns" subtitle={`${data?.campaigns.length ?? 0} campaigns grouped by source + attack category`}>
         {error && <div className="mb-3 rounded-lg border border-cyber-red/40 bg-cyber-red/10 p-3 text-xs text-cyber-red">{error}</div>}
         {!data || data.campaigns.length === 0 ? (
           <EmptyState icon={<Target className="h-8 w-8" />} title="No campaigns detected yet"
             description="Campaigns appear once incidents share source IPs and attack categories." />
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {data.campaigns.map((c) => (
-              <CampaignCard key={c.campaign_id} c={c} />
-            ))}
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead>
+                <tr>
+                  <th>Campaign</th><th>Attack family</th><th>Severity</th><th>Risk</th><th>Confidence</th>
+                  <th>Events</th><th>Assets</th><th>Techniques</th><th>Momentum</th><th>Velocity</th>
+                  <th>Prediction</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.campaigns.map((c) => (
+                  <tr key={c.campaign_id} className="cursor-pointer hover:bg-night-850/60" onClick={() => navigate(`/campaigns/${c.campaign_id}`)}>
+                    <td className="font-mono text-xs font-bold text-electric-400">{c.campaign_id}</td>
+                    <td className="max-w-[180px] truncate text-xs text-slate-200">{c.category}</td>
+                    <td><SeverityBadge severity={c.severity} /></td>
+                    <td className="font-mono text-xs" style={{ color: sevColor(c.severity) }}>{c.risk_score.toFixed(0)}</td>
+                    <td className="font-mono text-xs text-slate-400">{(c.confidence * 100).toFixed(0)}%</td>
+                    <td className="font-mono text-xs text-slate-400">{c.event_count.toLocaleString()}</td>
+                    <td className="font-mono text-xs text-slate-400">{c.asset_count}</td>
+                    <td>
+                      <div className="flex max-w-[180px] flex-wrap gap-1">
+                        {c.techniques.slice(0, 3).map((t) => (
+                          <span key={t} className="rounded bg-cyber-purple/10 px-1.5 py-0.5 font-mono text-[9px] text-cyber-purple">{t}</span>
+                        ))}
+                        {c.techniques.length > 3 && <span className="text-[9px] text-slate-600">+{c.techniques.length - 3}</span>}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`font-mono text-xs font-bold ${c.momentum_status === "ESCALATING" ? "text-cyber-red" : c.momentum_status === "STABLE" ? "text-cyber-yellow" : "text-cyber-green"}`}>
+                        {c.momentum.toFixed(0)}
+                      </span>
+                      {c.escalation_detected && <span className="ml-1 rounded bg-cyber-red/15 px-1 py-0.5 text-[8px] font-bold text-cyber-red">ESC</span>}
+                    </td>
+                    <td><span className="badge border border-night-700 text-slate-300">{c.velocity_band}</span></td>
+                    <td className="max-w-[150px] text-xs text-slate-400">
+                      {c.prediction ? (
+                        <>
+                          <span className="text-cyber-purple">{c.prediction.predicted_stage}</span>
+                          <span className="text-slate-600"> · {(c.prediction.probability * 100).toFixed(0)}%</span>
+                        </>
+                      ) : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td><StatusBadge status={c.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
+        {data?.note && <p className="mt-4 rounded-lg border border-night-700 bg-night-850/60 p-3 text-[11px] leading-relaxed text-slate-400">{data.note}</p>}
       </Card>
-    </div>
-  );
-}
-
-function FunnelBox({ label, value, color, hint }: { label: string; value: number; color: string; hint?: string }) {
-  return (
-    <div className="glass glass-hover relative overflow-hidden p-4 text-center">
-      <div className="absolute inset-x-0 top-0 h-0.5" style={{ background: color, boxShadow: `0 0 12px ${color}` }} />
-      <p className="font-mono text-2xl font-bold" style={{ color }}>{typeof value === "number" ? value.toLocaleString() : value}</p>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      {hint && <p className="mt-0.5 text-[9px] text-slate-600">{hint}</p>}
-    </div>
-  );
-}
-
-function CampaignCard({ c }: { c: Campaign }) {
-  const navigate = useNavigate();
-  const sevColor = c.severity === "CRITICAL" ? "#f87171" : c.severity === "HIGH" ? "#fb923c" : c.severity === "MEDIUM" ? "#facc15" : "#4ade80";
-  const intel = useCampaignIntel(c.campaign_id);
-  const momentumStatusColor =
-    intel?.momentum.status === "ESCALATING" ? "#f87171" : intel?.momentum.status === "STABLE" ? "#facc15" : "#4ade80";
-  return (
-    <div className="glass glass-hover cursor-pointer p-4" onClick={() => navigate(`/campaigns/${c.campaign_id}`)}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Radar className="h-4 w-4" style={{ color: sevColor }} />
-          <span className="font-mono text-sm font-bold" style={{ color: sevColor }}>{c.campaign_id}</span>
-        </div>
-        <span className="badge border" style={{ color: sevColor, borderColor: `${sevColor}44`, background: `${sevColor}11` }}>{c.severity}</span>
-      </div>
-      <p className="mt-2 text-sm font-semibold text-slate-100">{c.category}</p>
-      <p className="font-mono text-[10px] text-slate-500">source {shortId(c.source)} · risk {c.risk_score.toFixed(0)}/100</p>
-
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-md bg-night-850/60 p-2">
-          <p className="font-mono text-lg font-bold text-electric-400">{c.incident_count}</p>
-          <p className="text-[8px] uppercase tracking-wider text-slate-500">incidents</p>
-        </div>
-        <div className="rounded-md bg-night-850/60 p-2">
-          <p className="font-mono text-lg font-bold text-cyber-purple">{c.event_count.toLocaleString()}</p>
-          <p className="text-[8px] uppercase tracking-wider text-slate-500">events</p>
-        </div>
-        <div className="rounded-md bg-night-850/60 p-2">
-          <p className="font-mono text-lg font-bold text-cyber-yellow">{c.duration_hours}h</p>
-          <p className="text-[8px] uppercase tracking-wider text-slate-500">window</p>
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-1">
-        {(c.techniques ?? []).slice(0, 6).map((t) => (
-          <span key={t} className="rounded bg-cyber-purple/10 px-1.5 py-0.5 font-mono text-[9px] text-cyber-purple">{t}</span>
-        ))}
-        {(c.techniques ?? []).length === 0 && <span className="text-[9px] text-slate-600">no MITRE mapping</span>}
-      </div>
-
-      <div className="mt-3 flex items-center gap-1.5 border-t border-night-800/70 pt-2.5">
-        <Link2 className="h-3 w-3 text-slate-600" />
-        <span className="ml-auto text-[9px] uppercase tracking-wide text-electric-400/70">open command center →</span>
-        <div className="flex flex-wrap gap-1">
-          {c.incidents.slice(0, 4).map((i) => (
-            <span key={i} className="font-mono text-[9px] text-slate-500">{shortId(i)}</span>
-          ))}
-          {c.incident_count > 4 && <span className="text-[9px] text-slate-600">+{c.incident_count - 4} more</span>}
-        </div>
-      </div>
-
-      {intel ? (
-        <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-night-800/70 pt-2.5">
-          <IntelBadge label="velocity" value={intel.velocity.band} color={VELOCITY_COLORS[intel.velocity.band] ?? "#38bdf8"} />
-          <IntelBadge label="momentum" value={`${intel.momentum.momentum.toFixed(0)} · ${intel.momentum.status}`} color={momentumStatusColor} />
-          <IntelBadge label="mitre" value={`${intel.mitre_coverage.overall_coverage.toFixed(0)}%`} color="#a78bfa" />
-          {intel.velocity.campaign_escalation_detected && (
-            <span className="rounded bg-cyber-red/15 px-1.5 py-0.5 text-[9px] font-bold text-cyber-red">ESCALATING</span>
-          )}
-        </div>
-      ) : (
-        <div className="mt-2.5 border-t border-night-800/70 pt-2.5 text-[9px] text-slate-600">computing campaign intelligence…</div>
-      )}
     </div>
   );
 }

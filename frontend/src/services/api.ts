@@ -60,10 +60,13 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean; _retryCount?: number }) | undefined;
     // Retry transient gateway/network failures with backoff so the app recovers
-    // by itself when the backend is waking up (free-tier cold start). Only
-    // retry idempotent requests — never replay a POST that may have side effects.
+    // by itself when the backend is waking up (free-tier cold start). This is
+    // safe for non-GET requests too: a 502/503/504 (or a dropped connection)
+    // means the proxy never reached a healthy app, so the request was never
+    // processed and has no side effects to duplicate.
     const method = (original?.method ?? "").toUpperCase();
-    if (original && method === "GET" && isTransientGatewayError(error) && (original._retryCount ?? 0) < MAX_GATEWAY_RETRIES) {
+    const retryableMethod = method === "GET" || method === "POST" || method === "PUT" || method === "PATCH";
+    if (original && retryableMethod && isTransientGatewayError(error) && (original._retryCount ?? 0) < MAX_GATEWAY_RETRIES) {
       original._retryCount = (original._retryCount ?? 0) + 1;
       const delay = Math.min(1000 * 2 ** original._retryCount, 8000); // 2s, 4s, 8s, 8s
       await new Promise((resolve) => setTimeout(resolve, delay));

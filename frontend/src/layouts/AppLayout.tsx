@@ -73,6 +73,7 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: strin
       { to: "/attack-dna", label: "Attack DNA", icon: <Dna className="h-4 w-4" /> },
       { to: "/attack-graph", label: "Attack Graph", icon: <GitBranch className="h-4 w-4" /> },
       { to: "/threat-intelligence", label: "Threat Intelligence", icon: <Fingerprint className="h-4 w-4" /> },
+      { to: "/threat-analyzer", label: "Threat Analyzer", icon: <Search className="h-4 w-4" /> },
       { to: "/mitre-matrix", label: "MITRE ATT&CK Matrix", icon: <Target className="h-4 w-4" /> },
     ],
   },

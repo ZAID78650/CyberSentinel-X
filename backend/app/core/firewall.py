@@ -7,9 +7,11 @@ Layers implemented as ASGI/Starlette middleware + a status endpoint:
 3. WAF_PAYLOAD  — filters SQLi / XSS / path-traversal / command-injection
                  patterns in request bodies and query strings
 4. SECURITY_HDR — hardened response headers (CSP, HSTS, frame/XSS options)
-5. RATE_LIMIT   — per-key request throttling for auth and API endpoints
-6. IP_WATCH     — blocks known-bad IPs from the threat-intel feed
-7. BRUTE_GUARD  — per-account login throttling (5 attempts / 10 min lockout)
+5. RATE_LIMIT     — per-key request throttling for auth and API endpoints
+6. IP_WATCH       — blocks known-bad IPs from the threat-intel feed
+7. MALWARE_GUARD  — blocks control-plane requests that reference known
+                   malware indicators (hashes, C2 domains, families)
+8. BRUTE_GUARD    — per-account login throttling (5 attempts / 10 min lockout)
 
 Each layer reports status and counters through GET /api/security/firewall.
 """
@@ -39,6 +41,7 @@ _LAYER_ORDER = [
     "SECURITY_HDR",
     "RATE_LIMIT",
     "IP_WATCH",
+    "MALWARE_GUARD",
     "BRUTE_GUARD",
 ]
 
@@ -49,6 +52,7 @@ _LAYER_META: Dict[str, Dict[str, Any]] = {
     "SECURITY_HDR": {"name": "Hardened Headers", "description": "CSP, HSTS, frame and MIME-sniffing protection", "color": "#4ade80"},
     "RATE_LIMIT": {"name": "Rate Limiting", "description": "Per-IP request throttling", "color": "#22d3ee"},
     "IP_WATCH": {"name": "Threat IP Watchlist", "description": "Blocks source IPs from the threat-intel feed", "color": "#f87171"},
+    "MALWARE_GUARD": {"name": "Cyber Malware Prevention", "description": "Blocks control-plane requests referencing known malware hashes, C2 domains or families", "color": "#fb7185"},
     "BRUTE_GUARD": {"name": "Credential Brute-Force Guard", "description": "Locks accounts after repeated failures", "color": "#a78bfa"},
 }
 
@@ -87,6 +91,95 @@ _PATTERNS = [
     ("Path Traversal", _TRAVERSAL),
     ("Command Injection", _CMDI),
 ]
+
+# --------------------------------------------------------------------------
+# MALWARE_GUARD — indicator set + control-plane allowlist
+# --------------------------------------------------------------------------
+
+# Paths where malware indicators are legitimate data (ingest, scans, queries,
+# artifact references). Everywhere else, referencing a known malware indicator
+# is treated as suspicious and blocked.
+_MALWARE_DATA_PLANE_PREFIXES = (
+    "/api/events/",
+    "/api/dataset/",
+    "/api/simulations/",
+    "/api/malware/",
+    "/api/threat-hunting",
+    "/api/threat-intelligence",
+    "/api/alerts/",
+    "/api/incidents/",
+    "/api/evidence/",
+    "/api/investigations/",
+    "/api/campaigns",
+    "/api/predictions",
+    "/api/attack-dna",
+    "/api/ueba",
+    "/api/analytics",
+    "/api/soc",
+    "/api/security/analyze",
+)
+
+_MALWARE_INDICATOR_TYPES = ("HASH", "DOMAIN", "MALWARE")
+_malware_set: Optional[set] = None
+_malware_set_at = 0.0
+_MALWARE_SET_TTL = 60.0
+
+
+def _load_malware_set() -> set:
+    """Lowercased CRITICAL/HIGH malware indicator values (hashes, C2 domains,
+    family names), cached for 60s. Loaded lazily to avoid import cycles."""
+    global _malware_set, _malware_set_at
+    now = time.monotonic()
+    if _malware_set is not None and now - _malware_set_at < _MALWARE_SET_TTL:
+        return _malware_set
+    values: set = set()
+    try:
+        from app.core.database import SessionLocal
+        from app.models.intel import ThreatIndicator
+        from sqlalchemy import select
+
+        db = SessionLocal()
+        try:
+            rows = db.scalars(
+                select(ThreatIndicator.value).where(
+                    ThreatIndicator.indicator_type.in_(_MALWARE_INDICATOR_TYPES),
+                    ThreatIndicator.severity.in_(["CRITICAL", "HIGH"]),
+                )
+            ).all()
+            values = {str(v).lower() for v in rows}
+        finally:
+            db.close()
+    except Exception as exc:  # pragma: no cover
+        logger.warning("malware guard: indicator load failed: %s", exc)
+    with _lock:
+        _malware_set = values
+        _malware_set_at = time.monotonic()
+    return values
+
+
+def malware_guard_test_payload() -> Dict[str, Any]:
+    """Deterministic demo payload: references a known malware hash (EICAR)."""
+    return {"note": "firewall test", "hash": "44d88612fea8a8f36de82e1278abb02f"}
+
+
+def _body_malware_hit(parsed: Any) -> Optional[str]:
+    """Recursively scan a parsed JSON body for known malware indicator values."""
+    if parsed is None:
+        return None
+    indicators = _load_malware_set()
+    stack = [parsed]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, str):
+            lowered = node.strip().lower()
+            if lowered in indicators:
+                return node
+    return None
+
 
 # --------------------------------------------------------------------------
 # Public helpers
@@ -199,15 +292,16 @@ class FirewallMiddleware(BaseHTTPMiddleware):
             if len(body) > limit:
                 _counters["BODY_LIMIT"]["blocked"] += 1
                 return JSONResponse(status_code=413, content={"detail": "Request body too large"})
-            # ---- WAF_PAYLOAD ---------------------------------------------
+            # ---- WAF_PAYLOAD + MALWARE_GUARD ------------------------------
             # Multipart bodies are skipped: multipart boundaries ("--")
             # trigger SQLi/comment false positives and file content is
             # inspected by the malware scanner instead.
             content_type = request.headers.get("content-type", "")
+            parsed_body: Any = None
             if body and "multipart/form-data" not in content_type:
                 try:
-                    payload_text = json.loads(body)
-                    scan = json.dumps(payload_text, ensure_ascii=False)
+                    parsed_body = json.loads(body)
+                    scan = json.dumps(parsed_body, ensure_ascii=False)
                 except Exception:
                     scan = body.decode("utf-8", errors="ignore")
                 hit = self._waf_scan(scan)
@@ -215,6 +309,19 @@ class FirewallMiddleware(BaseHTTPMiddleware):
                     _counters["WAF_PAYLOAD"]["blocked"] += 1
                     logger.warning("firewall: WAF blocked %s (%s) from %s", hit, request.url.path, ip)
                     return JSONResponse(status_code=400, content={"detail": f"Request rejected by WAF: {hit}"})
+                # Cyber Malware Prevention: block control-plane requests that
+                # reference known malware indicators (hashes, C2 domains,
+                # families). Data-plane paths carry these legitimately.
+                if not request.url.path.startswith(_MALWARE_DATA_PLANE_PREFIXES):
+                    malware_hit = _body_malware_hit(parsed_body)
+                    if malware_hit:
+                        _counters["MALWARE_GUARD"]["blocked"] += 1
+                        logger.warning("firewall: MALWARE_GUARD blocked %s (indicator %r) from %s", request.url.path, malware_hit, ip)
+                        return JSONResponse(status_code=403, content={
+                            "detail": f"Request references known malware indicator ({malware_hit}) — blocked by MALWARE_GUARD",
+                            "layer": "MALWARE_GUARD",
+                            "indicator": malware_hit,
+                        })
 
         # ---- RATE_LIMIT --------------------------------------------------
         if request.url.path.startswith("/api/"):

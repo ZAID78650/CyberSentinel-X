@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Shield, ShieldCheck, Lock, Ban, Radar, Flame, Activity } from "lucide-react";
-import { api } from "../services/api";
+import { Shield, ShieldCheck, ShieldAlert, Lock, Ban, Radar, Flame, Activity, Bug, Loader2 } from "lucide-react";
+import { api, getErrorMessage } from "../services/api";
 import { Card, ProgressBar, Skeleton } from "../components/ui";
 import type { FirewallLayer, FirewallSummary } from "../types";
 
@@ -11,6 +12,7 @@ const LAYER_ICONS: Record<string, React.ReactNode> = {
   SECURITY_HDR: <ShieldCheck className="h-4 w-4" />,
   RATE_LIMIT: <Lock className="h-4 w-4" />,
   IP_WATCH: <Radar className="h-4 w-4" />,
+  MALWARE_GUARD: <Bug className="h-4 w-4" />,
   BRUTE_GUARD: <Shield className="h-4 w-4" />,
 };
 
@@ -19,6 +21,29 @@ export default function DefenseCenter() {
     queryKey: ["firewall"],
     queryFn: async () => (await api.get<FirewallSummary>("/security/firewall")).data,
   });
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  const testMalwareGuard = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      // Send a payload that references a known malware hash (EICAR). The
+      // MALWARE_GUARD middleware intercepts it and returns 403 before the
+      // route runs — that 403 IS the demonstration.
+      const res = await api.post("/security/firewall/test-malware", { note: "firewall test", hash: "44d88612fea8a8f36de82e1278abb02f" });
+      setTestResult(`No block: ${(res.data as { hint?: string }).hint ?? "request passed through"}`);
+    } catch (err) {
+      const resp = (err as { response?: { status?: number; data?: { detail?: string } } }).response;
+      if (resp && resp.status === 403) {
+        setTestResult(`Blocked — HTTP 403: ${resp.data?.detail ?? "Request references known malware indicator"}`);
+      } else {
+        setTestResult(`Request failed: ${getErrorMessage(err)}`);
+      }
+    } finally {
+      setTesting(false);
+    }
+  };
 
   if (isLoading || !data) {
     return <div className="grid gap-4 md:grid-cols-2"><Skeleton className="h-40" /><Skeleton className="h-40" /><Skeleton className="h-64 md:col-span-2" /></div>;
@@ -37,7 +62,18 @@ export default function DefenseCenter() {
           <h2 className="text-lg font-bold text-slate-100">Defense Center</h2>
           <p className="text-xs text-slate-500">Defense-in-depth firewall · {data.protection_level}</p>
         </div>
+        <button className="btn-primary ml-auto" onClick={testMalwareGuard} disabled={testing}>
+          {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bug className="h-4 w-4" />}
+          Test malware guard
+        </button>
       </div>
+
+      {testResult && (
+        <div className={`flex items-start gap-2 rounded-lg border p-3 text-xs ${testResult.startsWith("Blocked") ? "border-cyber-red/40 bg-cyber-red/10 text-cyber-red" : "border-night-700 bg-night-850/60 text-slate-300"}`}>
+          <ShieldAlert className={`mt-0.5 h-4 w-4 shrink-0 ${testResult.startsWith("Blocked") ? "text-cyber-red" : "text-slate-500"}`} />
+          <span>{testResult}</span>
+        </div>
+      )}
 
       {/* Protection overview */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

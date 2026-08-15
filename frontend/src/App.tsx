@@ -38,6 +38,7 @@ import Playbooks from "./pages/Playbooks";
 import MitreMatrix from "./pages/MitreMatrix";
 import JudgeMode from "./pages/JudgeMode";
 import SBOM from "./pages/SBOM";
+import ThreatAnalyzer from "./pages/ThreatAnalyzer";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -99,6 +100,7 @@ export default function App() {
         <Route path="/mitre-matrix" element={<MitreMatrix />} />
         <Route path="/judge-mode" element={<JudgeMode />} />
         <Route path="/sbom" element={<SBOM />} />
+        <Route path="/threat-analyzer" element={<ThreatAnalyzer />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
 

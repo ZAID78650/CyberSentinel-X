@@ -454,7 +454,10 @@ def ingest_unsw_files(
             file_seen = 0
             while file_seen < ftotal and total_rows < grand_total:
                 take = min(CHUNK, ftotal - file_seen, grand_total - total_rows)
-                rows = read_rows(p, nrows=take, skiprows=file_seen or None)
+                # skiprows as an int would also skip the header — pass a range
+                # that keeps row 0 (the header) and skips already-read data.
+                skip = range(1, file_seen + 1) if file_seen else None
+                rows = read_rows(p, nrows=take, skiprows=skip)
                 if not rows:
                     break
                 events = [

@@ -11,8 +11,10 @@ from fastapi.responses import JSONResponse
 from app.api.routes import (
     alerts,
     analytics,
+    analytics_ext,
     attack_dna,
     auth,
+    campaign_intel,
     dashboard,
     dataset,
     evidence,
@@ -22,13 +24,16 @@ from app.api.routes import (
     investigations,
     malware,
     oauth,
+    pipeline,
     predictions,
     reports,
+    sbom,
     response,
     security,
     simulations,
     threat_intel,
     soc_tools,
+    ueba,
     websocket,
 )
 from app.core.config import get_settings
@@ -113,6 +118,8 @@ app.include_router(threat_intel.router)
 app.include_router(attack_dna.router)
 app.include_router(evidence.router)
 app.include_router(predictions.router)
+app.include_router(sbom.router)
+app.include_router(pipeline.router)
 app.include_router(malware.router)
 app.include_router(soc_tools.router)
 app.include_router(dashboard.router)
@@ -120,6 +127,9 @@ app.include_router(dataset.router)
 app.include_router(response.router)
 app.include_router(reports.router)
 app.include_router(analytics.router)
+app.include_router(analytics_ext.router)
+app.include_router(campaign_intel.router)
+app.include_router(ueba.router)
 app.include_router(simulations.router)
 app.include_router(websocket.router)
 

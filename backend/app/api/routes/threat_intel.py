@@ -49,6 +49,53 @@ def search_intel(
     return ThreatIntelSearchResponse(query=req.query, hits=hits, source_count=len(adapter.list_sources()))
 
 
+@router.get("/sources/status")
+def sources_status(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    """Threat-intel fusion status: which feeds are configured and their provenance.
+
+    Only real sources are reported. If no external STIX/TAXII/API feed is
+    configured, `live_feed_configured` is false and the UI shows
+    NO LIVE THREAT INTELLIGENCE SOURCE CONFIGURED.
+    """
+    from app.models.intel import ThreatIndicator
+    from sqlalchemy import func, select
+
+    adapter = ThreatIntelAdapter(db)
+    sources = adapter.list_sources()
+    indicator_count = db.scalar(select(func.count()).select_from(ThreatIndicator)) or 0
+    live = [
+        {
+            "name": s.name,
+            "source_type": s.source_type,
+            "status": s.status,
+            "base_url": s.base_url,
+            "description": s.description,
+        }
+        for s in sources
+        if s.source_type != "local"
+    ]
+    return {
+        "sources": [
+            {
+                "name": s.name,
+                "source_type": s.source_type,
+                "status": s.status,
+                "base_url": s.base_url,
+                "description": s.description,
+            }
+            for s in sources
+        ],
+        "live_feed_configured": bool(live),
+        "live_sources": live,
+        "indicator_count": indicator_count,
+        "message": None if live else "NO LIVE THREAT INTELLIGENCE SOURCE CONFIGURED",
+        "provenance": {
+            "mode": "LIVE" if live else "DATASET",
+            "feed": ", ".join(s["name"] for s in live) or "local synthetic feed only",
+        },
+    }
+
+
 @router.get("/mitre", response_model=list[MitreTechniqueOut])
 def list_mitre(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     from app.models.intel import MitreTechnique

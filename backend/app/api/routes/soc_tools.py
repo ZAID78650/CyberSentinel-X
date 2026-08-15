@@ -99,7 +99,9 @@ def campaigns(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    return compute_campaigns(db, limit=limit)
+    from app.services.cache import get_or_build
+    # TTL cache: campaign computation is an N+1 read over incidents/events.
+    return get_or_build(f"campaigns:{limit}", 20.0, lambda: compute_campaigns(db, limit=limit))
 
 
 # ---------------------------------------------------------------------------

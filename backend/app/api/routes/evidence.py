@@ -82,6 +82,7 @@ def ledger(db: Session = Depends(get_db), _user: User = Depends(get_current_user
                 "block_index": b.block_index,
                 "prev_block_hash": b.prev_block_hash,
                 "records_digest": b.records_digest,
+                "merkle_root": b.merkle_root,
                 "nonce": b.nonce,
                 "block_hash": b.block_hash,
                 "record_count": b.record_count,
@@ -108,9 +109,20 @@ async def mine(
         "mined": True,
         "block_index": block.block_index,
         "block_hash": block.block_hash,
+        "merkle_root": block.merkle_root,
         "nonce": block.nonce,
         "record_count": block.record_count,
     }
+
+
+@router.post("/ledger/backfill-merkle")
+def backfill_merkle(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("ADMIN")),
+):
+    """Backfill Merkle roots for blocks mined before the tree was introduced."""
+    result = EvidenceService(db).backfill_merkle_roots(created_by=user.email)
+    return result
 
 
 @router.post("/ledger/verify")

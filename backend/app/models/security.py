@@ -87,6 +87,7 @@ class Alert(Base, UUIDMixin, TimestampMixin):
     assigned_to: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
     incident: Mapped[Optional["Incident"]] = relationship(back_populates="alert", uselist=False)
+    feedback: Mapped[List["AnalystFeedback"]] = relationship(back_populates="alert", cascade="all, delete-orphan")
 
 
 class Incident(Base, UUIDMixin, TimestampMixin):

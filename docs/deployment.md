@@ -29,9 +29,17 @@ A `render.yaml` blueprint in the repo root deploys the whole stack
 Notes:
 - Free-tier web services spin down after ~15 min idle; bump plans in the
   dashboard for an always-on demo.
-- Upload datasets via **Data Sources → Upload Dataset** (persisted to the
-  backend's 1 GB disk at `/app/data`). Set `UNSW_DATASET_DIR` on the
-  backend service if you want direct UNSW file ingestion.
+- Free tier does **not** support persistent disks, so the blueprint uses
+  none: SOC data (events, alerts, incidents, users) persists in the managed
+  Postgres database, while uploaded CSVs and the local RAG vector store live
+  on the service's ephemeral filesystem (`/app/data/uploads`,
+  `/app/data/vector_store`) and are re-uploaded/rebuild after a redeploy.
+  Paid plans can re-add a disk mounted at `/app/data`.
+- Upload datasets via **Data Sources → Upload Dataset**. Set
+  `UNSW_DATASET_DIR` on the backend service if you want direct UNSW file
+  ingestion.
+- Ports are explicit (`PORT=8000` backend, `PORT=80` frontend) because the
+  images do not listen on Render's default `$PORT=10000`.
 - Set `SMTP_*` / `LLM_PROVIDER` / API keys on the backend service as needed.
 
 Services:

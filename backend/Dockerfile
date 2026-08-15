@@ -52,8 +52,13 @@ COPY backend/docker-entrypoint.sh /docker-entrypoint.sh
 # RAG knowledge base (resolved as /data/knowledge_base at runtime)
 COPY data/knowledge_base /data/knowledge_base
 
-# Create data directory and set permissions
-RUN mkdir -p /app/data && \
+# Data lives under /app/data (writable by appuser): uploads + RAG vector store.
+# The uploads dir defaults to ../data/uploads relative to CWD — pin it here so
+# the non-root runtime user can always write, on any host (compose or Render).
+ENV DATASET_UPLOAD_DIR=/app/data/uploads
+
+# Create data directories and set permissions
+RUN mkdir -p /app/data/uploads && \
     chmod +x /docker-entrypoint.sh && \
     chmod +x /app/scripts/*.py 2>/dev/null || true && \
     chown -R appuser:appuser /app

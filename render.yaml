@@ -9,19 +9,29 @@
 #   3. First deploy builds both Docker images (backend/ + frontend/), runs
 #      alembic migrations + idempotent seed on startup, and comes up healthy.
 #
+# Free-tier notes:
+#   - Persistent disks are NOT available on the free tier, so this blueprint
+#     uses no disk. SOC data (events, alerts, incidents, users) lives in the
+#     managed Postgres database and survives restarts/redeploys. Uploaded CSV
+#     files and the local RAG vector store live on the service's ephemeral
+#     filesystem and are rebuilt on demand — upload datasets again after a
+#     redeploy if they are missing. Paid plans can re-add the disk block.
+#   - Free-tier services spin down after ~15 min of inactivity and cold-start
+#     on the next request (first load may take ~30-60s). Bump plans in the
+#     Render dashboard for always-on.
+#   - The public service URLs below are hardcoded because Render's blueprint
+#     validator rejects `fromService.property: url`. If Render assigns a
+#     different URL (name collision), update these values in the dashboard.
+#
 # Optional env vars you may want to set per service:
-#   - UNSW_DATASET_DIR: absolute path to the UNSW-NB15 CSVs inside the disk
-#     (upload CSVs via the Data Sources → Upload tab instead — no env needed).
+#   - UNSW_DATASET_DIR: absolute path to the UNSW-NB15 CSVs (upload CSVs via
+#     the Data Sources → Upload tab instead — no env needed).
 #   - SMTP_USER / SMTP_PASSWORD / EMAIL_FROM / OPS_EMAIL for email alerts.
 #   - LLM_PROVIDER=openai|gemini + matching API key, if you want the live LLM
 #     agent instead of the deterministic local provider.
-#
-# Note: free-tier web services spin down after 15 min of inactivity; the
-# Blueprint defaults to free but you can bump plans in the Render dashboard.
-
 services:
   # ---------------------------------------------------------------------------
-  # Backend — FastAPI + uvicorn/gunicorn, Postgres, alembic migrations + seed
+  # Backend — FastAPI + gunicorn/uvicorn, Postgres, alembic migrations + seed
   # ---------------------------------------------------------------------------
   - type: web
     name: cybersentinel-backend
@@ -29,13 +39,13 @@ services:
     repo: https://github.com/ZAID78650/CyberSentinel-X
     plan: free
     dockerfilePath: backend/Dockerfile
-    # Build context is the repo root (Dockerfiles COPY backend/... and frontend/...)
-    buildCommand: ""  # Dockerfile is self-contained
     envVars:
       - key: DATABASE_URL
         fromDatabase:
           name: cybersentinel-postgres
           property: connectionString
+      - key: PORT
+        value: "8000"
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -56,26 +66,17 @@ services:
         value: local
       - key: VECTOR_DB_PATH
         value: /app/data/vector_store
+      - key: DATASET_UPLOAD_DIR
+        value: /app/data/uploads
       - key: CORS_ORIGINS
-        fromService:
-          name: cybersentinel-frontend
-          type: web
-          property: url
+        value: https://cybersentinel-frontend.onrender.com
       - key: FRONTEND_URL
-        fromService:
-          name: cybersentinel-frontend
-          type: web
-          property: url
+        value: https://cybersentinel-frontend.onrender.com
       - key: UNSW_DATASET_DIR
-        value: ""  # upload datasets via the UI instead
+        value: ""
       - key: UNSW_INGEST_LIMIT
         value: "0"
-    disk:
-      name: backend-data
-      mountPath: /app/data
-      sizeGB: 1
     healthCheckPath: /health
-
   # ---------------------------------------------------------------------------
   # Frontend — static build served by nginx, proxying /api + /ws to the backend
   # ---------------------------------------------------------------------------
@@ -85,15 +86,12 @@ services:
     repo: https://github.com/ZAID78650/CyberSentinel-X
     plan: free
     dockerfilePath: frontend/Dockerfile
-    buildCommand: ""  # Dockerfile is self-contained (multi-stage node → nginx)
     envVars:
+      - key: PORT
+        value: "80"
       - key: BACKEND_URL
-        fromService:
-          name: cybersentinel-backend
-          type: web
-          property: url
+        value: https://cybersentinel-backend.onrender.com
     healthCheckPath: /
-
 # ---------------------------------------------------------------------------
 # Managed PostgreSQL
 # ---------------------------------------------------------------------------

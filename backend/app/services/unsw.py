@@ -192,24 +192,20 @@ def _rule_score_for(data: Dict[str, Any]) -> Tuple[float, Optional[str]]:
     return 0.0, None
 
 
-def score_and_annotate(events: List[Dict[str, Any]], fit_sample: int = 20000) -> List[Dict[str, Any]]:
-    """Fit the Isolation Forest on a stratified sample and score every event.
-
-    Returns the same dicts with ``anomaly_score`` / ``is_anomalous`` /
-    ``detection_reason`` filled in.
-    """
+def fit_detector(events: List[Dict[str, Any]], fit_sample: int = 20000) -> AnomalyDetector:
+    """Fit the Isolation Forest on a stratified ~50/50 normal/attack sample."""
     detector = AnomalyDetector(contamination=0.06)
-    # Stratified sample: keep ~50/50 normal/attack from the corpus.
     normals = [e for e in events if (e["metadata"].get("label") or 0) == 0]
     attacks = [e for e in events if (e["metadata"].get("label") or 0) == 1]
-    sample = (
-        normals[: fit_sample // 2]
-        + attacks[: fit_sample // 2]
-    )
+    sample = normals[: fit_sample // 2] + attacks[: fit_sample // 2]
     if len(sample) >= 12:
         detector.fit(sample)
         logger.info("unsw: IsolationForest fitted on %d sampled flows", len(sample))
+    return detector
 
+
+def score_with_detector(detector: AnomalyDetector, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Score events with an already-fitted detector (rule score wins ties)."""
     scored: List[Dict[str, Any]] = []
     for e in events:
         ml = detector.score(e)
@@ -223,6 +219,16 @@ def score_and_annotate(events: List[Dict[str, Any]], fit_sample: int = 20000) ->
         e["detection_reason"] = reason
         scored.append(e)
     return scored
+
+
+def score_and_annotate(events: List[Dict[str, Any]], fit_sample: int = 20000) -> List[Dict[str, Any]]:
+    """Fit the Isolation Forest on a stratified sample and score every event.
+
+    Returns the same dicts with ``anomaly_score`` / ``is_anomalous`` /
+    ``detection_reason`` filled in.
+    """
+    detector = fit_detector(events, fit_sample)
+    return score_with_detector(detector, events)
 
 
 # ---------------------------------------------------------------------------
@@ -305,13 +311,21 @@ def create_correlated_incidents(
 # CSV parsing + orchestrated ingestion
 # ---------------------------------------------------------------------------
 
-def read_rows(path: str) -> List[Dict[str, Any]]:
+def read_rows(path: str, nrows: Optional[int] = None, skiprows: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Read a slice of the CSV into record dicts (memory-bounded for streaming)."""
     import pandas as pd  # deferred import keeps app startup light
 
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, nrows=nrows, skiprows=skiprows)
     df = df.fillna("")
     df.columns = [c.strip().lower() for c in df.columns]
     return df.to_dict(orient="records")
+
+
+def count_rows(path: str) -> int:
+    """Cheap row count for a CSV (reads a single column)."""
+    import pandas as pd  # deferred import keeps app startup light
+
+    return int(pd.read_csv(path, usecols=[0]).shape[0])
 
 
 # Global ingestion progress/state (single worker at a time)
@@ -411,81 +425,100 @@ def ingest_unsw_files(
         if clear_existing:
             _clear_dataset_events(db)
 
-        # --- parse all CSVs -------------------------------------------------
-        raw: List[Dict[str, Any]] = []
-        total = 0
-        for p in paths:
-            rows = read_rows(p)
-            prefix = "train" if "train" in p.lower() else ("test" if "test" in p.lower() else f"set{len(raw)}")
-            for i, row in enumerate(rows):
-                row["_prefix"] = prefix
-                row["_idx"] = i + 1
-            raw.extend(rows)
-            total += len(rows)
-        if limit and limit > 0:
-            raw = raw[:limit]
-        UNSW_STATE["total_rows"] = len(raw)
-
-        # --- map to canonical events ---------------------------------------
-        events: List[Dict[str, Any]] = []
-        total_rows = len(raw)
-        for seq, row in enumerate(raw):
-            prefix = row.pop("_prefix")
-            idx = row.pop("_idx")
-            events.append(map_row(prefix, idx, seq + 1, total_rows, row))
-        del raw
-
-        # --- score with the hybrid engine ----------------------------------
-        scored = score_and_annotate(events, fit_sample=fit_sample)
-
-        # --- bulk insert ----------------------------------------------------
+        # --- stream the CSVs in bounded batches -----------------------------
+        # Peak memory stays proportional to one batch (CHUNK rows) instead of
+        # the whole corpus — the Render free tier only has 512 MB RAM and the
+        # previous all-at-once load (raw + events + scored lists) was OOM-killed.
+        CHUNK = 5000
         BULK = 5000
+
+        file_totals = [count_rows(p) for p in paths]
+        grand_total = sum(file_totals)
+        if limit and limit > 0:
+            grand_total = min(grand_total, limit)
+
+        detector = None
         inserted = 0
-        for start in range(0, len(scored), BULK):
-            chunk = scored[start : start + BULK]
-            db.bulk_insert_mappings(
-                SecurityEvent,
-                [
-                    {
-                        "event_id": e["event_id"],
-                        "timestamp": e["timestamp"],
-                        "event_type": e["event_type"],
-                        "severity": e["severity"],
-                        "source_ip": e.get("source_ip"),
-                        "destination_ip": e.get("destination_ip"),
-                        "user_id": e.get("user_id"),
-                        "device_id": e.get("device_id"),
-                        "asset_id": e.get("asset_id"),
-                        "source": "unsw-bulk",
-                        "metadata_": e.get("metadata"),
-                        "anomaly_score": e.get("anomaly_score"),
-                        "is_anomalous": e.get("is_anomalous", False),
-                        "detection_reason": e.get("detection_reason"),
-                    }
-                    for e in chunk
-                ],
-            )
-            db.commit()
-            inserted += len(chunk)
-            UNSW_STATE["processed_rows"] = inserted
+        anomaly_events: List[Dict[str, Any]] = []
+        seq = 0
+        total_rows = 0
+        for fi, (p, ftotal) in enumerate(zip(paths, file_totals)):
+            if total_rows >= grand_total:
+                break
+            if "train" in p.lower():
+                prefix = "train"
+            elif "test" in p.lower():
+                prefix = "test"
+            else:
+                prefix = f"set{fi}"
+            file_seen = 0
+            while file_seen < ftotal and total_rows < grand_total:
+                take = min(CHUNK, ftotal - file_seen, grand_total - total_rows)
+                rows = read_rows(p, nrows=take, skiprows=file_seen or None)
+                if not rows:
+                    break
+                events = [
+                    map_row(prefix, file_seen + i + 1, seq + i + 1, grand_total, row)
+                    for i, row in enumerate(rows)
+                ]
+                del rows
+                seq += len(events)
+                total_rows += len(events)
+                file_seen += len(events)
+                UNSW_STATE["total_rows"] = total_rows
+
+                if detector is None:
+                    detector = fit_detector(events, fit_sample)
+                scored = score_with_detector(detector, events)
+                anomaly_events.extend(e for e in scored if e["is_anomalous"])
+
+                for start in range(0, len(scored), BULK):
+                    chunk = scored[start : start + BULK]
+                    db.bulk_insert_mappings(
+                        SecurityEvent,
+                        [
+                            {
+                                "event_id": e["event_id"],
+                                "timestamp": e["timestamp"],
+                                "event_type": e["event_type"],
+                                "severity": e["severity"],
+                                "source_ip": e.get("source_ip"),
+                                "destination_ip": e.get("destination_ip"),
+                                "user_id": e.get("user_id"),
+                                "device_id": e.get("device_id"),
+                                "asset_id": e.get("asset_id"),
+                                "source": "unsw-bulk",
+                                "metadata_": e.get("metadata"),
+                                "anomaly_score": e.get("anomaly_score"),
+                                "is_anomalous": e.get("is_anomalous", False),
+                                "detection_reason": e.get("detection_reason"),
+                            }
+                            for e in chunk
+                        ],
+                    )
+                    db.commit()
+                    inserted += len(chunk)
+                    UNSW_STATE["processed_rows"] = inserted
+                del scored, events
+
         UNSW_STATE["inserted_rows"] = inserted
-        UNSW_STATE["attack_flows"] = sum(1 for e in scored if e["is_anomalous"])
-        UNSW_STATE["normal_flows"] = inserted - UNSW_STATE["attack_flows"]
+        UNSW_STATE["attack_flows"] = len(anomaly_events)
+        UNSW_STATE["normal_flows"] = inserted - len(anomaly_events)
 
         # --- automatic correlation -> alerts + incidents --------------------
-        clusters = _build_correlations(scored)
+        clusters = _build_correlations(anomaly_events)
         alerts, incidents = create_correlated_incidents(db, clusters)
         UNSW_STATE["alerts_created"] = alerts
         UNSW_STATE["incidents_created"] = incidents
         UNSW_STATE["last_error"] = None
         logger.info(
             "unsw: ingested %d flows (%d attack, %d normal), %d alerts, %d incidents",
-            inserted, UNSW_STATE["attack_flows"], UNSW_STATE["normal_flows"],
+            inserted, len(anomaly_events), UNSW_STATE["normal_flows"],
             alerts, incidents,
         )
         return {
             "inserted": inserted,
-            "attack_flows": UNSW_STATE["attack_flows"],
+            "attack_flows": len(anomaly_events),
             "normal_flows": UNSW_STATE["normal_flows"],
             "alerts_created": alerts,
             "incidents_created": incidents,

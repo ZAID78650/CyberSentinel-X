@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Fingerprint, Radar, Search, ShieldAlert, ShieldCheck, TrendingUp } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import ProvenanceBadge from "../components/ui/ProvenanceBadge";
@@ -54,14 +55,33 @@ function bandColor(band: string) {
 }
 
 export default function ThreatAnalyzer() {
-  const [query, setQuery] = useState("");
+  const [params, setParams] = useSearchParams();
+  const [query, setQuery] = useState(params.get("q") ?? "");
   const analyze = useMutation({
     mutationFn: async (q: string) => (await api.post<AnalyzeResult>("/security/analyze", { query: q })).data,
   });
 
+  // Deep-link support: ?q=… auto-runs the analysis (from Live Events, Global
+  // Search, entity drill-downs…), and re-runs when the query changes.
+  const qParam = params.get("q");
+  useEffect(() => {
+    if (qParam && qParam !== query) {
+      setQuery(qParam);
+      analyze.mutate(qParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qParam]);
+  useEffect(() => {
+    if (query.trim() && !analyze.isSuccess) analyze.mutate(query.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (query.trim()) analyze.mutate(query.trim());
+    if (query.trim()) {
+      analyze.mutate(query.trim());
+      setParams({ q: query.trim() }, { replace: true });
+    }
   };
 
   const r = analyze.data;

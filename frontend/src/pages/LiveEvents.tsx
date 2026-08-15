@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Filter, Search } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Activity, Fingerprint, Filter, Search } from "lucide-react";
 import { api } from "../services/api";
 import { useSocket } from "../contexts/WebSocketContext";
 import { Card, EmptyState, SeverityBadge, Skeleton } from "../components/ui";
@@ -104,7 +105,7 @@ export default function LiveEvents() {
               <thead>
                 <tr>
                   <th>Timestamp</th><th>Event ID</th><th>Type</th><th>Severity</th>
-                  <th>Source IP</th><th>User</th><th>Anomaly</th><th>Detection reason</th>
+                  <th>Source IP</th><th>User</th><th>Anomaly</th><th>Detection reason</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -116,8 +117,16 @@ export default function LiveEvents() {
                     <td className="font-mono text-[11px] text-electric-400">{e.event_id}</td>
                     <td className="font-mono text-xs text-slate-200">{e.event_type}</td>
                     <td><SeverityBadge severity={e.severity} /></td>
-                    <td className="font-mono text-xs">{e.source_ip ?? "—"}</td>
-                    <td className="text-xs">{e.user_id ?? "—"}</td>
+                    <td className="font-mono text-xs">
+                      {e.source_ip ? (
+                        <Link to={`/entity/ip/${encodeURIComponent(e.source_ip)}`} className="text-electric-400 hover:underline">{e.source_ip}</Link>
+                      ) : "—"}
+                    </td>
+                    <td className="text-xs">
+                      {e.user_id ? (
+                        <Link to={`/entity/user/${encodeURIComponent(e.user_id)}`} className="text-slate-300 hover:text-electric-400 hover:underline">{e.user_id}</Link>
+                      ) : "—"}
+                    </td>
                     <td>
                       {e.is_anomalous ? (
                         <span className="badge border border-cyber-red/30 bg-cyber-red/10 text-cyber-red">ANOMALOUS</span>
@@ -126,6 +135,11 @@ export default function LiveEvents() {
                       )}
                     </td>
                     <td className="max-w-[280px] truncate text-xs text-slate-500">{e.detection_reason ?? "—"}</td>
+                    <td>
+                      <Link to={`/threat-analyzer?q=${encodeURIComponent(e.event_id)}`} className="inline-flex items-center gap-1 rounded-md border border-night-700 px-2 py-1 text-[10px] font-semibold text-slate-400 transition hover:border-electric-500/50 hover:text-electric-400" title="Run the threat analyzer on this event">
+                        <Fingerprint className="h-3 w-3" /> Analyze
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>

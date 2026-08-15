@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Shield, ShieldCheck, ShieldAlert, Lock, Ban, Radar, Flame, Activity, Bug, Loader2 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { Card, ProgressBar, Skeleton } from "../components/ui";
-import type { FirewallLayer, FirewallSummary } from "../types";
+import type { FirewallBlock, FirewallLayer, FirewallSummary } from "../types";
 
 const LAYER_ICONS: Record<string, React.ReactNode> = {
   REQUEST_ID: <Activity className="h-4 w-4" />,
@@ -20,6 +20,11 @@ export default function DefenseCenter() {
   const { data, isLoading } = useQuery({
     queryKey: ["firewall"],
     queryFn: async () => (await api.get<FirewallSummary>("/security/firewall")).data,
+  });
+  const { data: blockData } = useQuery({
+    queryKey: ["firewall-blocks"],
+    queryFn: async () => (await api.get<{ blocks: FirewallBlock[] }>("/security/firewall/blocks")).data,
+    refetchInterval: 15000,
   });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -51,6 +56,7 @@ export default function DefenseCenter() {
 
   const maxBlocked = Math.max(1, ...data.layers.map((l) => l.blocked));
   const active = data.layers.filter((l) => l.status === "ACTIVE").length;
+  const layerColor = (layer: string) => data.layers.find((l) => l.layer === layer)?.color ?? "#94a3b8";
 
   return (
     <div className="space-y-5">
@@ -118,6 +124,39 @@ export default function DefenseCenter() {
             </div>
           ))}
         </div>
+      </Card>
+
+      {/* Block log */}
+      <Card title="Firewall Block Log" subtitle={`${blockData?.blocks.length ?? 0} most recent blocks · live (15s refresh)`}>
+        {!blockData || blockData.blocks.length === 0 ? (
+          <p className="py-8 text-center text-xs text-slate-500">No blocks recorded yet — run the malware-guard test to see a real entry.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead>
+                <tr><th>Time</th><th>Layer</th><th>Request</th><th>Indicator</th><th>Source</th><th>Reason</th></tr>
+              </thead>
+              <tbody>
+                {blockData.blocks.map((b, i) => (
+                  <tr key={i}>
+                    <td className="whitespace-nowrap font-mono text-[11px] text-slate-400">
+                      {new Date(b.ts * 1000).toLocaleTimeString()}
+                    </td>
+                    <td>
+                      <span className="badge border font-mono text-[10px]" style={{ color: layerColor(b.layer), borderColor: `${layerColor(b.layer)}44`, background: `${layerColor(b.layer)}11` }}>
+                        {b.layer}
+                      </span>
+                    </td>
+                    <td className="font-mono text-[11px] text-slate-300">{b.method} <span className="text-slate-500">{b.path}</span></td>
+                    <td className="font-mono text-[11px] text-cyber-red">{b.indicator ?? "—"}</td>
+                    <td className="font-mono text-[11px] text-slate-400">{b.source_ip}</td>
+                    <td className="max-w-[260px] truncate text-xs text-slate-500">{b.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );

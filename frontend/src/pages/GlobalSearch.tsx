@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Boxes, Dna, FileText, Loader2, Search, Target } from "lucide-react";
+import { Boxes, Dna, FileText, Fingerprint, Loader2, Search, Target } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { Card, EmptyState, SeverityBadge, Skeleton, StatusBadge } from "../components/ui";
 import type { GlobalSearchResult } from "../types";
@@ -67,6 +67,10 @@ export default function GlobalSearch() {
           <button className="btn-primary" onClick={() => void search(query)} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Search
           </button>
+          <Link to={`/threat-analyzer?q=${encodeURIComponent(query.trim())}`}
+            className={`btn-ghost ${!query.trim() ? "pointer-events-none opacity-40" : ""}`}>
+            <Fingerprint className="h-4 w-4" /> Analyze
+          </Link>
         </div>
       </Card>
 
@@ -137,10 +141,16 @@ function Row({ section, item }: { section: keyof GlobalSearchResult["results"]; 
         <div className="rounded-lg border border-night-700 bg-night-850/60 p-2.5">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[10px] font-bold text-slate-200">{e.event_type}</span>
-            <SeverityBadge severity={e.severity} />
+            <div className="flex items-center gap-1.5"><SeverityBadge severity={e.severity} /></div>
           </div>
-          <p className="mt-1 font-mono text-[10px] text-slate-400">{short(e.source_ip)} → {short(e.destination_ip)}</p>
+          <p className="mt-1 font-mono text-[10px] text-slate-400">
+            {e.source_ip ? <Link to={`/entity/ip/${encodeURIComponent(e.source_ip)}`} className="text-electric-400 hover:underline">{short(e.source_ip)}</Link> : "—"} →{" "}
+            {e.destination_ip ? <Link to={`/entity/ip/${encodeURIComponent(e.destination_ip)}`} className="text-electric-400 hover:underline">{short(e.destination_ip)}</Link> : "—"}
+          </p>
           <p className="text-[9px] text-slate-600">{new Date(e.timestamp).toLocaleString()}</p>
+          <Link to={`/threat-analyzer?q=${encodeURIComponent(e.event_id)}`} className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-night-700 px-1.5 py-0.5 text-[9px] font-semibold text-slate-400 transition hover:border-electric-500/50 hover:text-electric-400">
+            <Fingerprint className="h-2.5 w-2.5" /> Analyze
+          </Link>
         </div>
       );
     }

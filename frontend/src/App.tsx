@@ -39,6 +39,7 @@ import MitreMatrix from "./pages/MitreMatrix";
 import JudgeMode from "./pages/JudgeMode";
 import SBOM from "./pages/SBOM";
 import ThreatAnalyzer from "./pages/ThreatAnalyzer";
+import EntityDetail from "./pages/EntityDetail";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -101,6 +102,7 @@ export default function App() {
         <Route path="/judge-mode" element={<JudgeMode />} />
         <Route path="/sbom" element={<SBOM />} />
         <Route path="/threat-analyzer" element={<ThreatAnalyzer />} />
+        <Route path="/entity/:entityType/:value" element={<EntityDetail />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
 

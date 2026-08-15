@@ -492,6 +492,91 @@ export interface FirewallSummary {
   protection_level: string;
 }
 
+export interface FirewallBlock {
+  ts: number;
+  layer: string;
+  method: string;
+  path: string;
+  source_ip: string;
+  indicator?: string | null;
+  detail: string;
+}
+
+export interface FirewallBlockLog {
+  blocks: FirewallBlock[];
+}
+
+export interface EntityDetail {
+  entity: string;
+  entity_type: string;
+  events: number;
+  risk: number;
+  band: string;
+  components: Record<string, number>;
+  ueba: {
+    risk: number;
+    status: string;
+    factors: Array<{ name: string; score: number; evidence: string }>;
+    baseline_events: number;
+    current_events: number;
+    note: string;
+  };
+  features: {
+    off_hours_ratio: number;
+    failed_ratio: number;
+    distinct_devices: number;
+    distinct_ips: number;
+    anomaly_ratio: number;
+    rate_per_hour: number;
+  };
+  intel_hits: number;
+  intel: Array<{ value: string; indicator_type: string; severity: string; confidence: number; source: string; match_reason: string }>;
+  related_incidents: Array<{ id: string; incident_id: string; title: string; severity: string; status: string; risk_score?: number | null }>;
+  asset?: {
+    name: string;
+    asset_type: string;
+    ip_address?: string | null;
+    hostname?: string | null;
+    criticality: number;
+    owner?: string | null;
+  } | null;
+  recent_events: Array<{
+    event_id: string;
+    timestamp: string | null;
+    event_type: string;
+    severity: string;
+    is_anomalous: boolean;
+    detection_reason?: string | null;
+  }>;
+  note: string;
+}
+
+export interface PlaybookSimulation {
+  simulation: boolean;
+  playbook: { id: string; title: string; doc_type: string; source: string };
+  affected_assets: Array<{
+    name: string;
+    asset_type: string;
+    criticality: number;
+    ip_address?: string | null;
+    exposure: number;
+    exposure_after: number;
+    reduction_points: number;
+    reduction_pct: number;
+    anomalous_events: number;
+    intel_hits: number;
+    observed: boolean;
+  }>;
+  asset_count: number;
+  exposure_before: number;
+  exposure_after: number;
+  projected_reduction_pct: number;
+  reduction_ratio: number;
+  control_signals: string[];
+  provenance: { mode: string; basis: string };
+  note: string;
+}
+
 export interface AssetItem {
   id: string;
   name: string;

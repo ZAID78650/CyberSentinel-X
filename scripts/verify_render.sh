@@ -51,7 +51,7 @@ LOGIN=$(curl -s -m 20 -X POST "$API/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@cybersentinel.io","password":"Admin@2026"}')
 TOKEN=$(printf '%s' "$LOGIN" | python3 -c \
-  "import sys,json;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+  "import sys,json;d=json.load(sys.stdin);print(d.get('tokens',d).get('access_token',''))" 2>/dev/null || true)
 if [ -z "$TOKEN" ]; then
   echo "FAIL: login did not return a token. Response:"
   printf '%s' "$LOGIN" | head -c 500

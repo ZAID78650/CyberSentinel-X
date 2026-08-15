@@ -1,7 +1,7 @@
 """Security / firewall / assets / playbooks routes."""
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import cast, func, select, String
 from sqlalchemy.orm import Session
@@ -27,6 +27,13 @@ def get_firewall(_user: User = Depends(get_current_user)):
 @router.get("/firewall/layers")
 def get_firewall_layers(_user: User = Depends(get_current_user)):
     return {"layers": firewall_stats()}
+
+
+@router.get("/firewall/blocks")
+def get_firewall_blocks(limit: int = Query(50, ge=1, le=200), _user: User = Depends(get_current_user)):
+    """Most recent firewall block events (in-memory ring buffer, newest first)."""
+    from app.core.firewall import firewall_block_log
+    return {"blocks": firewall_block_log(limit)}
 
 
 @router.post("/firewall/test-malware")
@@ -230,6 +237,100 @@ def list_playbooks(
     return Paginated[dict](
         items=[_doc_dict(d) for d in items], total=total, page=page, page_size=page_size, pages=pages
     )
+
+
+@router.post("/playbooks/{doc_id}/simulate")
+def simulate_playbook(doc_id: str, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    """Playbook what-if: projects the risk reduction of deploying this playbook
+    over the assets it would affect. Every number is a labeled SIMULATION
+    projection from current asset exposure — never presented as measured
+    impact, and never applied automatically."""
+    from uuid import UUID
+    try:
+        doc_uuid = UUID(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Playbook document not found")
+    doc = db.get(KnowledgeDocument, doc_uuid)
+    if doc is None or doc.doc_type not in ("playbook", "policy", "cve", "mitre"):
+        raise HTTPException(status_code=404, detail="Playbook document not found")
+
+    from sqlalchemy import func as sa_func
+
+    # ---- current per-asset exposure (from stored telemetry) ---------------
+    assets = list(db.scalars(select(Asset).order_by(Asset.criticality.desc()).limit(100)).all())
+    rows: List[Dict[str, Any]] = []
+    for a in assets:
+        counts = db.scalar(
+            select(sa_func.count()).select_from(SecurityEvent).where(SecurityEvent.asset_id == a.name)
+        ) or 0
+        if not counts:
+            continue
+        anomalous = db.scalar(
+            select(sa_func.count()).select_from(SecurityEvent).where(
+                SecurityEvent.asset_id == a.name, SecurityEvent.is_anomalous.is_(True)
+            )
+        ) or 0
+        intel_hits = db.scalar(
+            select(sa_func.count()).select_from(SecurityEvent).where(
+                SecurityEvent.asset_id == a.name,
+                SecurityEvent.detection_reason.ilike("%Threat intel match%"),
+            )
+        ) or 0
+        crit = a.criticality or 1
+        exposure = round(min(100.0, crit * 10 + min(40.0, anomalous * 4) + min(30.0, intel_hits * 10) + 8), 1)
+        if exposure >= 10 or crit >= 4:
+            rows.append({"name": a.name, "asset_type": a.asset_type, "criticality": crit,
+                         "ip_address": a.ip_address, "exposure": exposure,
+                         "anomalous_events": anomalous, "intel_hits": intel_hits,
+                         "observed": True})
+    # Assets never seen in telemetry but high criticality still matter.
+    for a in assets:
+        if len(rows) >= 25:
+            break
+        if (a.criticality or 0) >= 4 and not any(r["name"] == a.name for r in rows):
+            crit = a.criticality or 1
+            rows.append({"name": a.name, "asset_type": a.asset_type, "criticality": crit,
+                         "ip_address": a.ip_address,
+                         "exposure": round(min(100.0, crit * 10), 1),
+                         "anomalous_events": 0, "intel_hits": 0, "observed": False})
+    rows.sort(key=lambda r: -r["exposure"])
+    rows = rows[:25]
+
+    # ---- projected reduction (labeled SIMULATION) -------------------------
+    base = {"playbook": 0.30, "cve": 0.25, "mitre": 0.20, "policy": 0.15}.get(doc.doc_type, 0.2)
+    content = (doc.content or "").lower()
+    control_keywords = ["block", "isolate", "contain", "quarantine", "revoke", "patch", "disable"]
+    matched_keywords = [k for k in control_keywords if k in content]
+    ratio = min(0.6, base + 0.05 * len(matched_keywords))
+
+    per_asset = []
+    for r in rows:
+        eff = ratio * (0.7 if not r["observed"] else 1.0)
+        after = round(r["exposure"] * (1 - eff), 1)
+        per_asset.append({
+            **r,
+            "exposure_after": after,
+            "reduction_points": round(r["exposure"] - after, 1),
+            "reduction_pct": round(eff * 100, 1),
+        })
+
+    before = round(sum(r["exposure"] for r in rows) / max(len(rows), 1), 1) if rows else 0.0
+    after = round(sum(r["exposure_after"] for r in per_asset) / max(len(per_asset), 1), 1) if per_asset else 0.0
+
+    return {
+        "simulation": True,
+        "playbook": {"id": str(doc.id), "title": doc.title, "doc_type": doc.doc_type, "source": doc.source},
+        "affected_assets": per_asset,
+        "asset_count": len(per_asset),
+        "exposure_before": before,
+        "exposure_after": after,
+        "projected_reduction_pct": round((1 - after / max(before, 1e-9)) * 100, 1) if before else 0.0,
+        "reduction_ratio": round(ratio, 2),
+        "control_signals": matched_keywords,
+        "provenance": {"mode": "SIMULATED",
+                        "basis": "what-if projection from current per-asset exposure (criticality + anomalous events + intel hits); not measured impact"},
+        "note": "Projection assumes the playbook controls are fully deployed. Numbers are labeled SIMULATION and never applied automatically.",
+    }
 
 
 def _asset_dict(a: Asset) -> dict:

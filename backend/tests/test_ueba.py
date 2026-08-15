@@ -79,3 +79,44 @@ def test_unknown_entity_type_rejected(db_session):
         assert False, "should have raised"
     except ValueError:
         pass
+
+
+def test_entity_detail_drilldown(db_session):
+    user = f"u-{uuid.uuid4().hex[:8]}"
+    for i in range(6):
+        _evt(db_session, user, i * 40, hour=10)
+    for i in range(4):
+        _evt(db_session, user, i, hour=3, day=0, event_type="LOGIN_FAILURE", anomaly=True, device=f"unk-{i}")
+    detail = ueba.entity_detail(db_session, "user", user)
+    assert detail["entity"] == user
+    assert detail["entity_type"] == "user"
+    assert detail["events"] == 10
+    assert 0.0 <= detail["risk"] <= 100.0
+    assert detail["band"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+    assert set(detail["components"]) == {"UEBA", "Threat Intelligence", "Anomaly Ratio", "Asset Criticality"}
+    assert detail["ueba"]["factors"], "off-hours + failure spike should surface factors"
+    assert detail["features"]["off_hours_ratio"] > 0
+    assert len(detail["recent_events"]) == 10
+    assert "note" in detail
+    # Unknown entity type must raise.
+    try:
+        ueba.entity_detail(db_session, "nope", "x")
+        assert False, "should have raised"
+    except ValueError:
+        pass
+
+
+def test_entity_detail_api(client, admin_headers, db_session):
+    # Entity with seeded events (from the corpus seed) must resolve via the API.
+    user = "u-entity-api"
+    for i in range(5):
+        _evt(db_session, user, i * 20, hour=11)
+    r = client.get(f"/api/ueba/entity/user/{user}", headers=admin_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["entity"] == user
+    assert body["events"] >= 5
+    assert "risk" in body and "recent_events" in body
+    # Invalid entity type -> 400.
+    r2 = client.get("/api/ueba/entity/nope/x", headers=admin_headers)
+    assert r2.status_code == 400

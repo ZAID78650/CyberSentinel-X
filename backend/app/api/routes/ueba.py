@@ -19,6 +19,17 @@ def profiles(entity_type: str = "user", limit: int = 15,
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/entity/{entity_type}/{value}")
+def entity_detail(entity_type: str, value: str,
+                  db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    """Drill-down for a single entity: UEBA profile, risk components, related
+    incidents, asset record, intel matches and recent activity."""
+    try:
+        return ueba.entity_detail(db, entity_type, value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/entity-risk")
 def entity_risk(entity_type: str = "user", limit: int = 15,
                 db: Session = Depends(get_db), _user: User = Depends(get_current_user)):

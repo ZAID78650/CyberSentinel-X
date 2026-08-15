@@ -20,8 +20,8 @@ import logging
 import re
 import time
 import uuid
-from collections import defaultdict
-from threading import Lock
+from collections import defaultdict, deque
+from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from fastapi import Request
@@ -58,7 +58,11 @@ _LAYER_META: Dict[str, Dict[str, Any]] = {
 
 _counters: Dict[str, Dict[str, int]] = defaultdict(lambda: {"blocked": 0, "passed": 0})
 _brute_failures: Dict[str, Dict[str, Any]] = {}
-_lock = Lock()
+# Ring buffer of recent blocks (layer, request, indicator) for the block log.
+_block_log: deque = deque(maxlen=200)
+# RLock: the block log may be written from inside record_brute_failure, which
+# already holds the lock (a plain Lock would deadlock on the second acquire).
+_lock = RLock()
 
 MAX_BODY_BYTES = 1024 * 1024  # 1 MB (regular API payloads)
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024  # 256 MB (dataset CSV uploads)
@@ -217,6 +221,33 @@ def firewall_summary() -> Dict[str, Any]:
     }
 
 
+def _record_block_raw(layer: str, method: str, path: str, source_ip: str, detail: str, indicator: Optional[str] = None) -> None:
+    """Append one entry to the in-memory block log (bounded ring buffer)."""
+    with _lock:
+        _block_log.appendleft({
+            "ts": time.time(),
+            "layer": layer,
+            "method": method,
+            "path": path,
+            "source_ip": source_ip,
+            "indicator": indicator,
+            "detail": detail,
+        })
+
+
+def _record_block(layer: str, request: Request, detail: str, indicator: Optional[str] = None) -> None:
+    _record_block_raw(
+        layer, request.method, request.url.path,
+        request.client.host if request.client else "unknown", detail, indicator,
+    )
+
+
+def firewall_block_log(limit: int = 50) -> List[Dict[str, Any]]:
+    """Most recent firewall blocks, newest first (bounded to 200 in memory)."""
+    with _lock:
+        return list(_block_log)[: max(1, min(limit, 200))]
+
+
 def record_brute_failure(key: str, max_failures: int = 5, lockout_seconds: int = 600) -> bool:
     """Record a failed credential attempt. Returns True when the key is now locked."""
     with _lock:
@@ -229,6 +260,8 @@ def record_brute_failure(key: str, max_failures: int = 5, lockout_seconds: int =
         if entry["count"] >= max_failures:
             entry["locked_until"] = now + lockout_seconds
             _counters["BRUTE_GUARD"]["blocked"] += 1
+            _record_block_raw("BRUTE_GUARD", "POST", "/api/auth/login", "account",
+                              f"Account locked after {max_failures} failed attempts", indicator=key)
             return True
         return False
 
@@ -279,6 +312,7 @@ class FirewallMiddleware(BaseHTTPMiddleware):
         ip = request.client.host if request.client else "unknown"
         if ip in self.blocked_ips:
             _counters["IP_WATCH"]["blocked"] += 1
+            _record_block("IP_WATCH", request, "Source IP on threat watchlist", indicator=ip)
             return JSONResponse(status_code=403, content={"detail": "Source IP blocked by threat watchlist"})
 
         # ---- BODY_LIMIT --------------------------------------------------
@@ -287,10 +321,12 @@ class FirewallMiddleware(BaseHTTPMiddleware):
             content_length = request.headers.get("content-length")
             if content_length and content_length.isdigit() and int(content_length) > limit:
                 _counters["BODY_LIMIT"]["blocked"] += 1
+                _record_block("BODY_LIMIT", request, f"Request body exceeds {limit} bytes")
                 return JSONResponse(status_code=413, content={"detail": "Request body too large"})
             body = await request.body()
             if len(body) > limit:
                 _counters["BODY_LIMIT"]["blocked"] += 1
+                _record_block("BODY_LIMIT", request, f"Request body exceeds {limit} bytes")
                 return JSONResponse(status_code=413, content={"detail": "Request body too large"})
             # ---- WAF_PAYLOAD + MALWARE_GUARD ------------------------------
             # Multipart bodies are skipped: multipart boundaries ("--")
@@ -307,6 +343,7 @@ class FirewallMiddleware(BaseHTTPMiddleware):
                 hit = self._waf_scan(scan)
                 if hit:
                     _counters["WAF_PAYLOAD"]["blocked"] += 1
+                    _record_block("WAF_PAYLOAD", request, f"WAF pattern matched: {hit}")
                     logger.warning("firewall: WAF blocked %s (%s) from %s", hit, request.url.path, ip)
                     return JSONResponse(status_code=400, content={"detail": f"Request rejected by WAF: {hit}"})
                 # Cyber Malware Prevention: block control-plane requests that
@@ -316,6 +353,7 @@ class FirewallMiddleware(BaseHTTPMiddleware):
                     malware_hit = _body_malware_hit(parsed_body)
                     if malware_hit:
                         _counters["MALWARE_GUARD"]["blocked"] += 1
+                        _record_block("MALWARE_GUARD", request, "Known malware indicator referenced", indicator=malware_hit)
                         logger.warning("firewall: MALWARE_GUARD blocked %s (indicator %r) from %s", request.url.path, malware_hit, ip)
                         return JSONResponse(status_code=403, content={
                             "detail": f"Request references known malware indicator ({malware_hit}) — blocked by MALWARE_GUARD",
@@ -330,6 +368,7 @@ class FirewallMiddleware(BaseHTTPMiddleware):
             allowed, _retry = limiter.check(f"api:{ip}")
             if not allowed:
                 _counters["RATE_LIMIT"]["blocked"] += 1
+                _record_block("RATE_LIMIT", request, "API rate limit exceeded (120 req/min)")
                 return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
         _counters["RATE_LIMIT"]["passed"] += 1

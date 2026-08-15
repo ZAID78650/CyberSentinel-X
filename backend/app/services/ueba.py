@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.security import Asset, SecurityEvent
+from app.models.security import Asset, Incident, SecurityEvent
 from app.risk.engine import band
 
 logger = logging.getLogger(__name__)
@@ -131,6 +131,110 @@ def _ueba_risk(events: List[SecurityEvent]) -> Dict[str, Any]:
         "risk": risk, "status": status, "factors": factors,
         "baseline_events": len(base), "current_events": len(curr),
         "note": "Baseline = first 60% of the entity's events; current = last 40%.",
+    }
+
+
+def entity_detail(db: Session, entity_type: str, value: str, sample_events: int = 25) -> Dict[str, Any]:
+    """Drill-down for one entity: UEBA baseline deviation, risk components,
+    intel matches, related incidents, asset record and a recent-event sample.
+    All numbers are computed from stored data — no fabricated analysis."""
+    col = ENTITY_COLUMNS.get(entity_type)
+    if col is None:
+        raise ValueError(f"Unknown entity type: {entity_type} (use user|ip|device)")
+    value = str(value).strip()
+    if not value:
+        raise ValueError("Entity value required")
+
+    all_events = list(db.scalars(
+        select(SecurityEvent).where(col == value).order_by(SecurityEvent.timestamp)
+    ).all())
+    ueba = _ueba_risk(all_events)
+    feats = _features(all_events) if all_events else {}
+    intel_hits = sum(1 for e in all_events if e.detection_reason and "Threat intel match" in (e.detection_reason or ""))
+    anomaly_ratio = sum(1 for e in all_events if e.is_anomalous) / max(len(all_events), 1)
+
+    # Related incidents through the incident-event join.
+    related: List[Dict[str, Any]] = []
+    eids = [e.event_id for e in all_events[:1000]]
+    if eids:
+        from app.models.security import IncidentEvent
+        seen_ids: set = set()
+        for ie in db.scalars(select(IncidentEvent).where(IncidentEvent.event_id.in_(eids))):
+            seen_ids.add(ie.incident_id)
+        if seen_ids:
+            incs = list(db.scalars(select(Incident).where(Incident.id.in_(list(seen_ids)[:10]))).all())
+            for inc in sorted(incs, key=lambda i: i.created_at, reverse=True)[:6]:
+                related.append({
+                    "id": str(inc.id),
+                    "incident_id": inc.incident_id, "title": inc.title,
+                    "severity": inc.severity, "status": inc.status,
+                    "risk_score": inc.risk_score,
+                })
+
+    # Asset record (best-effort match per entity type).
+    asset = None
+    if entity_type == "ip":
+        asset = db.scalar(select(Asset).where(Asset.ip_address == value))
+    elif entity_type == "device":
+        asset = db.scalar(select(Asset).where(Asset.hostname == value))
+    elif entity_type == "user":
+        asset = db.scalar(select(Asset).where(Asset.owner == value))
+    asset_row = None
+    if asset is not None:
+        asset_row = {
+            "name": asset.name, "asset_type": asset.asset_type,
+            "ip_address": asset.ip_address, "hostname": asset.hostname,
+            "criticality": asset.criticality, "owner": asset.owner,
+        }
+
+    criticality = (asset.criticality if asset else 5) or 5
+    components = {
+        "UEBA": round(ueba["risk"], 1),
+        "Threat Intelligence": round(min(100.0, intel_hits * 20), 1),
+        "Anomaly Ratio": round(anomaly_ratio * 100, 1),
+        "Asset Criticality": round(criticality * 10, 1),
+    }
+    risk = round(0.45 * ueba["risk"] + 0.25 * min(100.0, intel_hits * 20)
+                 + 0.20 * anomaly_ratio * 100 + 0.10 * criticality * 10, 1)
+
+    # Threat-intel feed match for the entity itself.
+    intel = []
+    try:
+        from app.threat_intel.adapter import ThreatIntelAdapter
+        intel = ThreatIntelAdapter(db).search(value)
+    except Exception:  # pragma: no cover
+        pass
+
+    recent = [{
+        "event_id": e.event_id, "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+        "event_type": e.event_type, "severity": e.severity,
+        "is_anomalous": e.is_anomalous, "detection_reason": e.detection_reason,
+    } for e in all_events[-sample_events:]]
+
+    return {
+        "entity": value,
+        "entity_type": entity_type,
+        "events": len(all_events),
+        "risk": risk,
+        "band": band(risk),
+        "components": components,
+        "ueba": ueba,
+        "features": {
+            "off_hours_ratio": round(feats.get("off_hours_ratio", 0.0), 3),
+            "failed_ratio": round(feats.get("failed_ratio", 0.0), 3),
+            "distinct_devices": int(feats.get("distinct_devices", 0)),
+            "distinct_ips": int(feats.get("distinct_ips", 0)),
+            "anomaly_ratio": round(feats.get("anomaly_ratio", 0.0), 3),
+            "rate_per_hour": round(feats.get("rate_per_hour", 0.0), 2),
+        },
+        "intel_hits": intel_hits,
+        "intel": [{"value": i["value"], "indicator_type": i["indicator_type"],
+                    "severity": i["severity"], "confidence": i["confidence"],
+                    "source": i["source"], "match_reason": i.get("match_reason", "")} for i in intel],
+        "related_incidents": related,
+        "asset": asset_row,
+        "recent_events": recent,
+        "note": "Risk = 0.45·UEBA + 0.25·intel + 0.20·anomaly ratio + 0.10·asset criticality; UEBA compares last 40% of events to the first 60% baseline.",
     }
 
 

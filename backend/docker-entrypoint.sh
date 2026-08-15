@@ -8,7 +8,8 @@ import os, time
 import sqlalchemy as sa
 
 url = os.environ.get("DATABASE_URL", "")
-if url.startswith("postgresql"):
+# Render emits postgres:// (SQLAlchemy treats it as an alias of postgresql://).
+if url.startswith("postgres"):
     engine = sa.create_engine(url, connect_args={"connect_timeout": 3})
     for i in range(60):
         try:

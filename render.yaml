@@ -47,7 +47,7 @@ services:
       - key: PORT
         value: "8000"
       - key: WEB_CONCURRENCY
-        value: "2"  # free tier has 512 MB RAM — keep worker count low
+        value: "1"  # free tier has 512 MB RAM — 1 worker leaves headroom for bulk ingestion
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET

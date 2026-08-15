@@ -18,6 +18,7 @@ import EvidenceLedger from "./pages/EvidenceLedger";
 import WarRoom from "./pages/WarRoom";
 import ThreatHunting from "./pages/ThreatHunting";
 import Campaigns from "./pages/Campaigns";
+import CampaignDetail from "./pages/CampaignDetail";
 import AssetRisk from "./pages/AssetRisk";
 import GlobalSearch from "./pages/GlobalSearch";
 import AttackSimulator from "./pages/AttackSimulator";
@@ -35,6 +36,8 @@ import DefenseCenter from "./pages/DefenseCenter";
 import Assets from "./pages/Assets";
 import Playbooks from "./pages/Playbooks";
 import MitreMatrix from "./pages/MitreMatrix";
+import JudgeMode from "./pages/JudgeMode";
+import SBOM from "./pages/SBOM";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -77,6 +80,7 @@ export default function App() {
         <Route path="/incidents/:id/war-room" element={<WarRoom />} />
         <Route path="/threat-hunting" element={<ThreatHunting />} />
         <Route path="/campaigns" element={<Campaigns />} />
+        <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/asset-risk" element={<AssetRisk />} />
         <Route path="/search" element={<GlobalSearch />} />
         <Route path="/attack-simulator" element={<AttackSimulator />} />
@@ -93,6 +97,8 @@ export default function App() {
         <Route path="/assets" element={<Assets />} />
         <Route path="/playbooks" element={<Playbooks />} />
         <Route path="/mitre-matrix" element={<MitreMatrix />} />
+        <Route path="/judge-mode" element={<JudgeMode />} />
+        <Route path="/sbom" element={<SBOM />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
 

@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Cpu,
   Crosshair,
+  Gavel,
   Database,
   Dna,
   FileText,
@@ -44,6 +45,7 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: strin
       { to: "/dashboard", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
       { to: "/live-events", label: "Live Events", icon: <Activity className="h-4 w-4" /> },
       { to: "/data-sources", label: "Data Sources", icon: <Database className="h-4 w-4" /> },
+      { to: "/judge-mode", label: "Judge Mode", icon: <Gavel className="h-4 w-4" /> },
     ],
   },
   {
@@ -102,6 +104,7 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: strin
       { to: "/attack-simulator", label: "Attack Simulator", icon: <Zap className="h-4 w-4" /> },
       { to: "/model-center", label: "Model Center", icon: <Cpu className="h-4 w-4" /> },
       { to: "/compliance", label: "Compliance Center", icon: <BadgeCheck className="h-4 w-4" /> },
+      { to: "/sbom", label: "SBOM & Supply Chain", icon: <Boxes className="h-4 w-4" /> },
     ],
   },
   {

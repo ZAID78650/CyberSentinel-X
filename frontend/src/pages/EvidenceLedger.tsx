@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  AlertTriangle, Boxes, CheckCircle2, Fingerprint, Hash, Loader2, Lock, RefreshCw,
+  AlertTriangle, Boxes, CheckCircle2, Fingerprint, GitCommitHorizontal, Hash, Loader2, Lock, RefreshCw,
   ShieldCheck, ShieldX, Trash2,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
@@ -24,6 +24,7 @@ export default function EvidenceLedger() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [mining, setMining] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -164,6 +165,23 @@ export default function EvidenceLedger() {
               {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {report ? "Re-verify chain" : "Verify chain"}
             </button>
+            {isAdmin && (
+              <button className="btn-ghost" onClick={async () => {
+                setBackfilling(true);
+                try {
+                  const res = await api.post<{ backfilled: number }>("/evidence/ledger/backfill-merkle");
+                  success("Merkle backfill", res.data.backfilled > 0 ? `Computed ${res.data.backfilled} missing Merkle root(s) from committed record hashes.` : "No pre-Merkle blocks to backfill.");
+                  await load();
+                } catch (err) {
+                  toastError("Backfill failed", getErrorMessage(err));
+                } finally {
+                  setBackfilling(false);
+                }
+              }} disabled={backfilling}>
+                {backfilling ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitCommitHorizontal className="h-4 w-4" />}
+                Backfill Merkle roots
+              </button>
+            )}
             {isAdmin && (
               <button className="btn-primary" onClick={mineBlock} disabled={mining}>
                 {mining ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}

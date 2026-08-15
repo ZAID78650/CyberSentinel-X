@@ -75,7 +75,7 @@ src/
 
 ```
 app/
-├── api/              routes + auth dependencies
+├── api/              routes + auth dependencies (incl. campaign_intel, ueba, analytics_ext)
 ├── agents/           base agent, detection/investigation/threat-intel/response agents,
 │                     orchestrator, LLM providers, allowlisted tools
 ├── attack_graph/     node/edge reconstruction with layered layout
@@ -87,9 +87,38 @@ app/
 ├── response/         recommendations, approvals, simulated execution
 ├── risk/             explainable scoring engine
 ├── schemas/          Pydantic schemas
-├── services/         auth, events, detection rules, alert/incident correlation, seed, simulator
+├── services/         auth, events, detection rules, alert/incident correlation, seed, simulator,
+│                     campaign_intel (velocity/momentum/similarity/mutation/MITRE coverage),
+│                     ueba (behavioral baselines, entity risk, attack surface),
+│                     data_quality (quality score, model drift PSI)
 └── threat_intel/     local STIX-shaped feed + adapter + MITRE dataset
 ```
+
+## Campaign intelligence & UEBA (new in this cycle)
+
+New engines compute analytics from real correlated data (no random values):
+
+- **Attack velocity** — kill-chain stage transition times, stages/hour, acceleration and
+  `LOW/MEDIUM/HIGH/CRITICAL` band + campaign-escalation flag.
+- **Campaign momentum** — 0-100 weighted score from event-rate change, new assets,
+  new techniques, severity change, anomaly ratio and exfiltration signals.
+- **Campaign similarity** — explainable weighted technique/behavior/severity/protocol/source
+  comparison (Jaccard + cosine) with per-component reasons.
+- **Campaign mutation** — flags campaigns with high behavioral similarity but low IOC overlap.
+- **MITRE detection coverage** — expected vs detected techniques per kill-chain tactic + gaps.
+- **Business impact** — qualitative HIGH/MEDIUM/LOW from critical assets, sensitive data stores,
+  affected users and external endpoints.
+- **UEBA** — per user/IP/device baselines (first 60% of history) vs current (last 40%) with
+  explainable factors (off-hours, failed-auth spike, new device, large data access).
+- **Entity risk + enterprise risk** — weighted UEBA/intel/anomaly/criticality per entity.
+- **Attack surface** — score from observed protocols, external endpoints, intel matches,
+  auth failures and ports.
+- **Data quality** — completeness/duplicates/imbalance/staleness/ingestion health -> 0-100.
+- **Model drift** — Population Stability Index / KL divergence on anomaly-score distributions.
+- **Merkle roots** — ledger blocks now carry a binary Merkle-tree root over their evidence hashes
+  (previously a linear digest), verified during chain audits.
+
+See [CAMPAIGN_UEBA_INTEL.md](CAMPAIGN_UEBA_INTEL.md) for endpoints, algorithms and the demo flow.
 
 ## Data flow for a simulated attack
 
@@ -102,3 +131,25 @@ app/
 5. WebSocket broadcasts keep the frontend live at every stage.
 6. Analysts approve high-impact actions; the simulated response executes and the incident is
    marked CONTAINED/RESOLVED.
+
+## Integration round — feedback loop, SBOM, intel fusion, Judge Mode
+
+- **Analyst feedback loop** — `analyst_feedback` table (alert FK, label, analyst, note);
+  `POST /api/alerts/{id}/feedback` (latest label wins per analyst) and
+  `GET /api/analytics/feedback-stats` (signals before correlation vs alerts after,
+  label distribution, observed precision and false-positive rate). Labels are stored,
+  audited (action_logs) and never silently applied to models.
+- **SBOM / supply chain** — `GET /api/sbom` scans the repo's own `package-lock.json` +
+  `requirements.txt` into a normalized SBOM and cross-references dependencies against
+  the local CVE feed. Explainable supply-chain risk with visible factor weights;
+  dependencies with no local CVE match are reported as not known-vulnerable, never guessed.
+- **Threat intel fusion status** — `GET /api/threat-intelligence/sources/status` reports
+  configured feeds with provenance; with only the local feed it explicitly returns
+  `NO LIVE THREAT INTELLIGENCE SOURCE CONFIGURED`.
+- **Data pipeline aggregate** — `GET /api/data/pipeline` reports INGEST → … → RETRAIN
+  with real per-stage counts and strict train/validation/test separation.
+- **Judge Mode** — `GET /api/analytics/judge-mode` aggregates the end-to-end pipeline
+  (EVENTS → ALERTS → CAMPAIGNS → ATTACK DNA → PREDICTION → BLAST RADIUS → RESPONSE →
+  BLOCKCHAIN PROOF) with real counts, provenance per stage, MTTD/MTTR, evidence verified,
+  merkle roots and agent-run health. Frontend page at `/judge-mode`; SBOM page at `/sbom`;
+  Alerts page has the TP/FP/Benign feedback controls.

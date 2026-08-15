@@ -1,5 +1,21 @@
 import type { DataProvenance } from "../../types";
 
+/**
+ * Map any backend provenance string to the canonical badge vocabulary.
+ * The backend emits canonical modes (LIVE/DATASET/SIMULATED/MODEL/LOCAL) plus
+ * prose labels ("DETECTION ENGINE", "HUMAN-IN-THE-LOOP", …); every page uses
+ * this single mapping so the vocabulary cannot drift per-page.
+ */
+export function provenanceKey(source?: string | null): DataProvenance {
+  const s = (source ?? "").toUpperCase();
+  if (s === "LIVE" || s.includes("LIVE")) return "LIVE";
+  if (s === "DATASET" || s.includes("DATASET")) return "DATASET";
+  if (s === "SIMULATED" || s.includes("SIMULATED")) return "SIMULATED";
+  if (s === "MODEL" || s.includes("MODEL") || s.includes("PREDICTION")) return "MODEL";
+  if (s === "LOCAL" || s.includes("LOCAL")) return "LOCAL";
+  return "UNKNOWN";
+}
+
 const STYLES: Record<DataProvenance, { cls: string; label: string }> = {
   LIVE: { cls: "border-cyber-green/40 bg-cyber-green/10 text-cyber-green", label: "LIVE" },
   DATASET: { cls: "border-electric-500/40 bg-electric-500/10 text-electric-400", label: "DATASET" },
@@ -15,7 +31,7 @@ const STYLES: Record<DataProvenance, { cls: string; label: string }> = {
  * ML model prediction, or local reference data — never mix them silently.
  */
 export default function ProvenanceBadge({ source, compact = false }: { source?: string | null; compact?: boolean }) {
-  const key = (source ?? "LOCAL").toUpperCase() as DataProvenance;
+  const key = provenanceKey(source);
   const style = STYLES[key] ?? STYLES.UNKNOWN;
   const dot = key === "LIVE" || key === "DATASET" || key === "MODEL";
   return (

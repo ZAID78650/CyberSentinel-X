@@ -1,14 +1,34 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ThumbsDown, ThumbsUp } from "lucide-react";
 import { api } from "../services/api";
-import { Card, EmptyState, SeverityBadge, Skeleton, StatusBadge } from "../components/ui";
+import { Card, EmptyState, SeverityBadge, Skeleton, StatCard, StatusBadge } from "../components/ui";
 import type { Alert, Paginated } from "../types";
+
+type FeedbackLabel = "TRUE_POSITIVE" | "FALSE_POSITIVE" | "BENIGN" | "UNKNOWN";
+
+interface FeedbackStats {
+  signals_before_correlation: number;
+  alerts_after_correlation: number;
+  correlation_ratio: number | null;
+  labeled_alerts: number;
+  label_counts: Record<string, number>;
+  false_positive_rate: number | null;
+  precision: number | null;
+  provenance: { mode: string; basis: string };
+}
+
+const LABEL_BTNS: Array<{ label: FeedbackLabel; cls: string }> = [
+  { label: "TRUE_POSITIVE", cls: "bg-cyber-green/15 text-cyber-green border-cyber-green/40 hover:bg-cyber-green/25" },
+  { label: "FALSE_POSITIVE", cls: "bg-cyber-red/15 text-cyber-red border-cyber-red/40 hover:bg-cyber-red/25" },
+  { label: "BENIGN", cls: "bg-slate-500/15 text-slate-300 border-slate-500/40 hover:bg-slate-500/25" },
+];
 
 export default function Alerts() {
   const [page, setPage] = useState(1);
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ["alerts", page, severity, status],
@@ -19,6 +39,21 @@ export default function Alerts() {
       return (await api.get<Paginated<Alert>>("/alerts", { params })).data;
     },
   });
+
+  const { data: stats } = useQuery({
+    queryKey: ["feedback-stats"],
+    queryFn: async () => (await api.get<FeedbackStats>("/analytics/feedback-stats")).data,
+  });
+
+  const feedback = useMutation({
+    mutationFn: async ({ alertId, label }: { alertId: string; label: FeedbackLabel }) =>
+      (await api.post(`/alerts/${alertId}/feedback`, { label })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["feedback-stats"] });
+    },
+  });
+
+  const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${(v * 100).toFixed(1)}%`);
 
   return (
     <div className="space-y-4">
@@ -34,7 +69,19 @@ export default function Alerts() {
         </select>
       </div>
 
-      <Card>
+      {stats && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Signals before correlation" value={stats.signals_before_correlation.toLocaleString()} color="#38bdf8" hint="anomalous events entering the correlation engine" />
+          <StatCard label="Alerts after correlation" value={stats.alerts_after_correlation.toLocaleString()} color="#a78bfa" hint={stats.correlation_ratio !== null ? `dedup ratio ${stats.correlation_ratio} events/alert` : "no signals yet"} />
+          <StatCard label="Observed precision" value={pct(stats.precision)} color="#34d399" hint="TP / (TP + FP) on labeled alerts" />
+          <StatCard label="False-positive rate" value={pct(stats.false_positive_rate)} color={stats.false_positive_rate !== null && stats.false_positive_rate > 0.3 ? "#f87171" : "#34d399"} hint={`${stats.labeled_alerts} alerts labeled · ${stats.provenance.mode}`} />
+        </div>
+      )}
+
+      <Card
+        title="Feedback loop"
+        subtitle="Mark alerts True Positive / False Positive / Benign — labels are stored, audited and drive the false-positive rate (no silent model changes)."
+      >
         {isLoading && !data ? (
           <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
         ) : !data || data.items.length === 0 ? (
@@ -45,20 +92,35 @@ export default function Alerts() {
               <thead>
                 <tr>
                   <th>Alert ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Category</th>
-                  <th>Confidence</th><th>Events</th><th>Created</th>
+                  <th>Confidence</th><th>Events</th><th>Analyst feedback</th>
                 </tr>
               </thead>
               <tbody>
                 {data.items.map((a) => (
                   <tr key={a.id}>
                     <td className="font-mono text-xs text-electric-400">{a.alert_id}</td>
-                    <td className="max-w-[280px] truncate font-medium text-slate-200">{a.title}</td>
+                    <td className="max-w-[240px] truncate font-medium text-slate-200">{a.title}</td>
                     <td><SeverityBadge severity={a.severity} /></td>
                     <td><StatusBadge status={a.status} /></td>
                     <td className="text-xs text-slate-400">{a.category}</td>
                     <td className="font-mono text-xs">{(a.confidence * 100).toFixed(0)}%</td>
                     <td className="font-mono text-xs">{a.source_event_ids.length}</td>
-                    <td className="whitespace-nowrap text-xs text-slate-500">{new Date(a.created_at).toLocaleString()}</td>
+                    <td>
+                      <div className="flex items-center gap-1">
+                        {LABEL_BTNS.map((b) => (
+                          <button
+                            key={b.label}
+                            title={b.label.replace("_", " ")}
+                            disabled={feedback.isPending}
+                            onClick={() => feedback.mutate({ alertId: a.id, label: b.label })}
+                            className={`badge cursor-pointer border transition ${b.cls}`}
+                          >
+                            {b.label === "TRUE_POSITIVE" ? <ThumbsUp className="h-3 w-3" /> : b.label === "FALSE_POSITIVE" ? <ThumbsDown className="h-3 w-3" /> : null}
+                            {b.label === "TRUE_POSITIVE" ? "TP" : b.label === "FALSE_POSITIVE" ? "FP" : "Benign"}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

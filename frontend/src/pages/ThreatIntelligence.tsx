@@ -1,9 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Fingerprint, Search, ShieldAlert } from "lucide-react";
+import { Fingerprint, Globe, Search, ShieldAlert } from "lucide-react";
 import { api } from "../services/api";
+import ProvenanceBadge from "../components/ui/ProvenanceBadge";
 import { Card, EmptyState, SeverityBadge, Skeleton } from "../components/ui";
 import type { MitreTechnique, Paginated, ThreatIndicator } from "../types";
+
+interface IntelSourcesStatus {
+  sources: Array<{ name: string; source_type: string; status: string; base_url: string | null; description: string | null }>;
+  live_feed_configured: boolean;
+  live_sources: Array<{ name: string; source_type: string }>;
+  indicator_count: number;
+  message: string | null;
+  provenance: { mode: string; feed: string };
+}
 
 export default function ThreatIntelligence() {
   const [query, setQuery] = useState("");
@@ -18,6 +28,11 @@ export default function ThreatIntelligence() {
   const { data: mitre } = useQuery({
     queryKey: ["mitre"],
     queryFn: async () => (await api.get<MitreTechnique[]>(`/threat-intelligence/mitre`)).data,
+  });
+
+  const { data: sourceStatus } = useQuery({
+    queryKey: ["intel-sources-status"],
+    queryFn: async () => (await api.get<IntelSourcesStatus>("/threat-intelligence/sources/status")).data,
   });
 
   const { data: searchResult, isFetching: searching } = useQuery({
@@ -81,6 +96,28 @@ export default function ThreatIntelligence() {
           </div>
         )}
       </Card>
+
+      {sourceStatus && (
+        <Card title="Threat intelligence fusion — feed status" subtitle="Provenance is explicit: every result states its source, confidence and feed.">
+          <div className="flex flex-wrap items-center gap-3">
+            <ProvenanceBadge source={sourceStatus.provenance.mode} />
+            <span className="badge border border-night-700 text-slate-400">{sourceStatus.indicator_count.toLocaleString()} indicators</span>
+            {sourceStatus.sources.map((s) => (
+              <span key={s.name} className={`badge border ${s.status === "ACTIVE" ? "border-cyber-green/40 bg-cyber-green/10 text-cyber-green" : "border-night-700 text-slate-500"}`}>
+                {s.name} · {s.source_type}
+              </span>
+            ))}
+          </div>
+          {!sourceStatus.live_feed_configured && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-cyber-yellow/30 bg-cyber-yellow/5 p-3 text-xs text-cyber-yellow">
+              <Globe className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {sourceStatus.message} — currently resolving against the <span className="font-semibold">local synthetic feed</span> only. STIX/TAXII or vendor APIs can be wired into the adapter without changing consumers.
+              </span>
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="flex gap-1 border-b border-night-700/70">
         {(["indicators", "mitre"] as const).map((t) => (

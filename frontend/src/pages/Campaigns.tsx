@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link2, Radar, Target } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api, getErrorMessage } from "../services/api";
 import { Card, EmptyState, Skeleton } from "../components/ui";
 import ProvenanceBadge from "../components/ui/ProvenanceBadge";
@@ -7,6 +8,37 @@ import type { Campaign, CampaignsResponse } from "../types";
 
 function shortId(s: string): string {
   return s.length > 12 ? `${s.slice(0, 12)}…` : s;
+}
+
+interface CampaignIntel {
+  velocity: { band: string; attack_velocity: number; campaign_escalation_detected: boolean };
+  momentum: { momentum: number; status: string };
+  mitre_coverage: { overall_coverage: number };
+}
+
+function useCampaignIntel(campaignId: string): CampaignIntel | null {
+  const [intel, setIntel] = useState<CampaignIntel | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.get<CampaignIntel>(`/campaigns/${campaignId}/intel`)
+      .then((res) => { if (alive) setIntel(res.data); })
+      .catch(() => { if (alive) setIntel(null); });
+    return () => { alive = false; };
+  }, [campaignId]);
+  return intel;
+}
+
+const VELOCITY_COLORS: Record<string, string> = {
+  LOW: "#4ade80", MEDIUM: "#facc15", HIGH: "#fb923c", CRITICAL: "#f87171",
+};
+
+function IntelBadge({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <span className="flex items-center gap-1 rounded bg-night-850/70 px-1.5 py-0.5 text-[9px] text-slate-400">
+      <span className="uppercase tracking-wide text-slate-600">{label}</span>
+      <b style={{ color }}>{value}</b>
+    </span>
+  );
 }
 
 export default function Campaigns() {
@@ -90,9 +122,13 @@ function FunnelBox({ label, value, color, hint }: { label: string; value: number
 }
 
 function CampaignCard({ c }: { c: Campaign }) {
+  const navigate = useNavigate();
   const sevColor = c.severity === "CRITICAL" ? "#f87171" : c.severity === "HIGH" ? "#fb923c" : c.severity === "MEDIUM" ? "#facc15" : "#4ade80";
+  const intel = useCampaignIntel(c.campaign_id);
+  const momentumStatusColor =
+    intel?.momentum.status === "ESCALATING" ? "#f87171" : intel?.momentum.status === "STABLE" ? "#facc15" : "#4ade80";
   return (
-    <div className="glass glass-hover p-4">
+    <div className="glass glass-hover cursor-pointer p-4" onClick={() => navigate(`/campaigns/${c.campaign_id}`)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Radar className="h-4 w-4" style={{ color: sevColor }} />
@@ -127,6 +163,7 @@ function CampaignCard({ c }: { c: Campaign }) {
 
       <div className="mt-3 flex items-center gap-1.5 border-t border-night-800/70 pt-2.5">
         <Link2 className="h-3 w-3 text-slate-600" />
+        <span className="ml-auto text-[9px] uppercase tracking-wide text-electric-400/70">open command center →</span>
         <div className="flex flex-wrap gap-1">
           {c.incidents.slice(0, 4).map((i) => (
             <span key={i} className="font-mono text-[9px] text-slate-500">{shortId(i)}</span>
@@ -134,6 +171,19 @@ function CampaignCard({ c }: { c: Campaign }) {
           {c.incident_count > 4 && <span className="text-[9px] text-slate-600">+{c.incident_count - 4} more</span>}
         </div>
       </div>
+
+      {intel ? (
+        <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-night-800/70 pt-2.5">
+          <IntelBadge label="velocity" value={intel.velocity.band} color={VELOCITY_COLORS[intel.velocity.band] ?? "#38bdf8"} />
+          <IntelBadge label="momentum" value={`${intel.momentum.momentum.toFixed(0)} · ${intel.momentum.status}`} color={momentumStatusColor} />
+          <IntelBadge label="mitre" value={`${intel.mitre_coverage.overall_coverage.toFixed(0)}%`} color="#a78bfa" />
+          {intel.velocity.campaign_escalation_detected && (
+            <span className="rounded bg-cyber-red/15 px-1.5 py-0.5 text-[9px] font-bold text-cyber-red">ESCALATING</span>
+          )}
+        </div>
+      ) : (
+        <div className="mt-2.5 border-t border-night-800/70 pt-2.5 text-[9px] text-slate-600">computing campaign intelligence…</div>
+      )}
     </div>
   );
 }

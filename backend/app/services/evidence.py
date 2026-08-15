@@ -87,6 +87,23 @@ def compute_record_hash(chain_index: int, prev_hash: str, content_hash: str, cre
     return sha256(f"{chain_index}|{prev_hash}|{content_hash}|{_canonical_dt(created_at)}")
 
 
+def merkle_root(hashes: List[str]) -> str:
+    """Binary Merkle tree root over a list of record hashes.
+
+    Odd layers duplicate the last leaf; empty input hashes the empty string.
+    The root lets anyone verify membership/integrity of the batch from just
+    the root + their own hash (no raw evidence is stored on-chain).
+    """
+    if not hashes:
+        return sha256("")
+    layer = list(hashes)
+    while len(layer) > 1:
+        if len(layer) % 2 == 1:
+            layer.append(layer[-1])
+        layer = [sha256(f"{layer[i]}|{layer[i + 1]}") for i in range(0, len(layer), 2)]
+    return layer[0]
+
+
 def compute_block_hash(block_index: int, prev_block_hash: str, records_digest: str, nonce: int) -> str:
     return sha256(f"{block_index}|{prev_block_hash}|{records_digest}|{nonce}")
 
@@ -187,6 +204,8 @@ class EvidenceService:
             raise ValueError("No evidence records to commit")
 
         records_digest = sha256(canonical({"hashes": [r.record_hash for r in uncommitted]}))
+        # Merkle root over the batch's record hashes (tree, not linear digest).
+        mroot = merkle_root([r.record_hash for r in uncommitted])
         nonce = mine_nonce(block_index, prev_block_hash, records_digest)
         block_hash = compute_block_hash(block_index, prev_block_hash, records_digest, nonce)
 
@@ -194,6 +213,7 @@ class EvidenceService:
             block_index=block_index,
             prev_block_hash=prev_block_hash,
             records_digest=records_digest,
+            merkle_root=mroot,
             nonce=nonce,
             block_hash=block_hash,
             record_count=len(uncommitted),
@@ -209,6 +229,38 @@ class EvidenceService:
                    target_type="ledger", target_id=str(block.block_index),
                    detail={"block_hash": block_hash[:12], "records": len(uncommitted)})
         return block
+
+    # ------------------------------------------------------------------
+    def backfill_merkle_roots(self, created_by: str = "evidence-agent") -> Dict[str, Any]:
+        """Compute Merkle roots for blocks mined before the tree was introduced.
+
+        Pre-Merkle blocks have ``merkle_root = NULL``; verification skips them
+        and judge-mode counts them as zero. This recomputes each missing root
+        from the block's committed record hashes (chain order) and persists it.
+        """
+        blocks = list(self.db.scalars(
+            select(LedgerBlock).where(LedgerBlock.merkle_root.is_(None)).order_by(LedgerBlock.block_index)
+        ).all())
+        backfilled = 0
+        for b in blocks:
+            ids = (b.meta or {}).get("evidence_ids", [])
+            if not ids:
+                continue
+            recs = list(self.db.scalars(
+                select(EvidenceRecord)
+                .where(EvidenceRecord.evidence_id.in_(ids[:200]))
+                .order_by(EvidenceRecord.chain_index)
+            ).all())
+            if not recs:
+                continue
+            b.merkle_root = merkle_root([r.record_hash for r in recs])
+            backfilled += 1
+        self.db.commit()
+        if backfilled:
+            log_action(self.db, actor=created_by, action="EVIDENCE.MERKLE_BACKFILL",
+                       target_type="ledger", target_id="all",
+                       detail={"blocks_backfilled": backfilled})
+        return {"backfilled": backfilled}
 
     # ------------------------------------------------------------------
     def verify_evidence(self, evidence_id: str) -> Dict[str, Any]:
@@ -272,8 +324,10 @@ class EvidenceService:
             prev = r.record_hash
 
         block_broken = False
+        merkle_broken = False
         bprev = GENESIS_HASH
         block_ok_count = 0
+        merkle_ok_count = 0
         for b in blocks:
             expected = compute_block_hash(b.block_index, b.prev_block_hash, b.records_digest, b.nonce)
             link_ok = b.prev_block_hash == bprev
@@ -282,21 +336,40 @@ class EvidenceService:
                 issues.append(f"block {b.block_index} hash/link mismatch")
             else:
                 block_ok_count += 1
+            # Merkle root check: recompute the tree from the block's records,
+            # in the same chain-index order used when the block was mined.
+            if b.merkle_root:
+                ids = (b.meta or {}).get("evidence_ids", [])
+                if ids:
+                    recs = list(self.db.scalars(
+                        select(EvidenceRecord)
+                        .where(EvidenceRecord.evidence_id.in_(ids[:200]))
+                        .order_by(EvidenceRecord.chain_index)
+                    ).all())
+                    recomputed = merkle_root([r.record_hash for r in recs])
+                    if recomputed == b.merkle_root:
+                        merkle_ok_count += 1
+                    else:
+                        merkle_broken = True
+                        issues.append(f"block {b.block_index} merkle root mismatch")
+                else:
+                    merkle_ok_count += 1
             bprev = b.block_hash
 
         self.db.commit()
-        integrity = "VALID" if (not chain_broken and not block_broken) else "TAMPERED"
+        integrity = "VALID" if (not chain_broken and not block_broken and not merkle_broken) else "TAMPERED"
         return {
             "integrity": integrity,
-            "valid": not chain_broken and not block_broken,
+            "valid": not chain_broken and not block_broken and not merkle_broken,
             "evidence_records": len(records),
             "evidence_verified": verified,
             "evidence_tampered": tampered,
             "ledger_blocks": len(blocks),
             "ledger_blocks_valid": block_ok_count,
+            "merkle_roots_valid": merkle_ok_count,
             "issues": issues,
             "audited_at": datetime.now(timezone.utc).isoformat(),
-            "method": "sha256 chain + proof-of-work ledger",
+            "method": "sha256 chain + merkle roots + proof-of-work ledger",
         }
 
     # ------------------------------------------------------------------

@@ -384,8 +384,13 @@ def compute_campaigns(db: Session, min_incidents: int = 1, limit: int = 20) -> D
             for m in db.scalars(select(IncidentMitreMapping).where(IncidentMitreMapping.incident_id == inc.id)):
                 technique_ids.add(m.technique_id)
         sev = max(incs, key=lambda i: SEVERITIES.index(i.severity) if i.severity in SEVERITIES else 0).severity
-        first = min(i.created_at for i in incs)
-        last = max(i.created_at for i in incs)
+        # SQLite returns naive datetimes while in-session objects may still be
+        # tz-aware — normalize before comparing (mixed aware/naive raises).
+        def _norm(dt):
+            return dt.replace(tzinfo=None) if dt is not None and dt.tzinfo is not None else dt
+
+        first = min(_norm(i.created_at) for i in incs)
+        last = max(_norm(i.created_at) for i in incs)
         campaigns.append({
             "campaign_id": f"CGN-{len(campaigns) + 1:04d}",
             "source": src or "unknown",

@@ -70,6 +70,7 @@ class LedgerBlock(Base, UUIDMixin, TimestampMixin):
     block_index: Mapped[int] = mapped_column(Integer, nullable=False)
     prev_block_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     records_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    merkle_root: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     nonce: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     block_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     record_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

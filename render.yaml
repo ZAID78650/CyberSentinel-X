@@ -12,10 +12,13 @@
 # Free-tier notes:
 #   - Persistent disks are NOT available on the free tier, so this blueprint
 #     uses no disk. SOC data (events, alerts, incidents, users) lives in the
-#     managed Postgres database and survives restarts/redeploys. Uploaded CSV
-#     files and the local RAG vector store live on the service's ephemeral
-#     filesystem and are rebuilt on demand — upload datasets again after a
-#     redeploy if they are missing. Paid plans can re-add the disk block.
+#     managed Postgres database and survives restarts/redeploys. The bundled
+#     UNSW-NB15 sample ships in the image and is restored into the (ephemeral)
+#     uploads dir + manifest automatically on startup, so the demo corpus and
+#     Dataset Scanner survive redeploys. Uploaded CSV files and the local RAG
+#     vector store live on the ephemeral filesystem — upload additional
+#     datasets again after a redeploy if they are missing. Paid plans can
+#     re-add the disk block.
 #   - Free-tier services spin down after ~15 min of inactivity and cold-start
 #     on the next request (first load may take ~30-60s). Bump plans in the
 #     Render dashboard for always-on.

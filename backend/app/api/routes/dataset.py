@@ -5,7 +5,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import delete, func, select
@@ -85,6 +85,51 @@ def _csv_preview(path: str) -> dict:
     except Exception:
         rows = 0
     return {"rows": rows, "columns": cols}
+
+
+# The bundled UNSW-NB15 sample ships inside the image (backend/data/samples)
+# so the demo corpus survives ephemeral-disk redeploys.
+BUNDLED_SAMPLE_SRC = os.path.join("data", "samples", "unsw_sample.csv")
+BUNDLED_SAMPLE_NAME = "UNSW_NB15-training-set.csv"
+
+
+def restore_bundled_sample() -> Dict[str, Any]:
+    """Copy the bundled UNSW sample into the uploads dir + manifest on startup.
+
+    The free-tier uploads dir is ephemeral — every redeploy wipes it, which
+    previously forced a manual re-upload. This makes the demo corpus self-heal:
+    if the sample is missing after a deploy, it is restored from the image and
+    registered, so Data Sources and the Dataset Scanner always have data.
+    """
+    import shutil
+
+    if get_settings().environment == "test":
+        return {"restored": False, "reason": "test env"}
+    upload_dir = _uploads_dir()
+    dest = os.path.join(upload_dir, BUNDLED_SAMPLE_NAME)
+    if os.path.exists(dest):
+        return {"restored": False, "reason": "already present"}
+    if not os.path.exists(BUNDLED_SAMPLE_SRC):
+        logger.info("bundled sample not found at %s — skipping restore", BUNDLED_SAMPLE_SRC)
+        return {"restored": False, "reason": "bundled sample not found"}
+    try:
+        shutil.copyfile(BUNDLED_SAMPLE_SRC, dest)
+        preview = _csv_preview(dest)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("bundled sample restore failed: %s", exc)
+        return {"restored": False, "reason": str(exc)}
+    manifest = _load_manifest()
+    manifest[BUNDLED_SAMPLE_NAME] = {
+        "name": BUNDLED_SAMPLE_NAME,
+        "size_bytes": os.path.getsize(dest),
+        "rows": preview["rows"],
+        "columns": preview["columns"],
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_by": "system (bundled sample)",
+    }
+    _save_manifest(manifest)
+    logger.info("restored bundled UNSW sample (%d rows)", preview["rows"])
+    return {"restored": True, "rows": preview["rows"]}
 
 
 def resolve_dataset_path(name: str) -> Optional[str]:

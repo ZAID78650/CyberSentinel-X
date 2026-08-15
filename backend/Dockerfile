@@ -49,6 +49,9 @@ COPY backend/alembic ./alembic
 COPY backend/app ./app
 COPY backend/scripts ./scripts
 COPY backend/docker-entrypoint.sh /docker-entrypoint.sh
+# Bundled UNSW-NB15 sample — restored into the (ephemeral) uploads dir on
+# startup so the demo corpus survives redeploys.
+COPY backend/data/samples /app/data/samples
 # RAG knowledge base (resolved as /data/knowledge_base at runtime)
 COPY data/knowledge_base /data/knowledge_base
 

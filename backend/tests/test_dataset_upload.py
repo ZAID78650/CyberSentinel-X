@@ -1,5 +1,14 @@
 """Tests for dataset upload, listing, deletion, and the dataset file scanner."""
 
+from app.api.routes.dataset import restore_bundled_sample
+
+
+def test_restore_bundled_sample_skipped_in_test_env():
+    # The startup restore never mutates the test uploads dir.
+    result = restore_bundled_sample()
+    assert result["restored"] is False
+    assert result["reason"] == "test env"
+
 
 def _make_csv(path: str, rows: list[list[str]], header: list[str]) -> str:
     import csv

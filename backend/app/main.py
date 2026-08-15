@@ -58,6 +58,9 @@ async def lifespan(app: FastAPI):
         run_seed(db)
     finally:
         db.close()
+    from app.api.routes.dataset import restore_bundled_sample
+
+    restore_bundled_sample()
     from app.api.routes.dataset import auto_detection_loop
 
     auto_detection_task = asyncio.create_task(auto_detection_loop())

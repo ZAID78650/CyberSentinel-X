@@ -29,7 +29,10 @@ export const tokenStore = {
 
 export const api = axios.create({
   baseURL: API_BASE,
-  timeout: 30000,
+  // Generous timeout: on the Render free tier the backend cold-starts after
+  // ~15 min of inactivity and the first request can be held for 30-60s while
+  // the instance boots.
+  timeout: 60000,
 });
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
@@ -42,10 +45,30 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 let refreshing: Promise<string | null> | null = null;
 
+const MAX_GATEWAY_RETRIES = 4;
+const GATEWAY_STATUSES = [502, 503, 504];
+
+function isTransientGatewayError(error: AxiosError): boolean {
+  // Render's edge returns 502/503/504 while a free-tier instance is still
+  // cold-starting; a missing response means the connection dropped mid-boot.
+  if (error.response && GATEWAY_STATUSES.includes(error.response.status)) return true;
+  return !error.response;
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
-    const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+    const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean; _retryCount?: number }) | undefined;
+    // Retry transient gateway/network failures with backoff so the app recovers
+    // by itself when the backend is waking up (free-tier cold start). Only
+    // retry idempotent requests — never replay a POST that may have side effects.
+    const method = (original?.method ?? "").toUpperCase();
+    if (original && method === "GET" && isTransientGatewayError(error) && (original._retryCount ?? 0) < MAX_GATEWAY_RETRIES) {
+      original._retryCount = (original._retryCount ?? 0) + 1;
+      const delay = Math.min(1000 * 2 ** original._retryCount, 8000); // 2s, 4s, 8s, 8s
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return api(original);
+    }
     if (error.response?.status === 401 && original && !original._retry && !original.url?.includes("/auth/login")) {
       original._retry = true;
       refreshing = refreshing ?? refreshAccessToken().finally(() => {

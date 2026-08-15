@@ -1,0 +1,24 @@
+name: keepalive
+
+# Render free-tier services spin down after ~15 minutes of inactivity and the
+# first request after that can 502 while they cold-start. Pinging every 10
+# minutes keeps the deployment warm so judges never hit the cold-start window.
+#
+# Note: GitHub may delay scheduled runs under heavy load; the frontend's
+# built-in retry logic covers any residual 502s either way.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Wake the Render deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake frontend (serves the SPA)
+        run: curl -sf -o /dev/null -m 60 https://cybersentinel-frontend.onrender.com/ || true
+
+      - name: Wake backend (via the frontend proxy, exact browser path)
+        run: curl -sf -o /dev/null -m 120 https://cybersentinel-frontend.onrender.com/health || true

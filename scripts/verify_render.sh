@@ -78,13 +78,22 @@ UPLOAD=$(curl -s -m 300 -H "$AUTH" -F "file=@$SAMPLE" "$API/dataset/upload")
 NAME=$(printf '%s' "$UPLOAD" | python3 -c \
   "import sys,json;print(json.load(sys.stdin).get('name',''))" 2>/dev/null || true)
 if [ -z "$NAME" ]; then
-  echo "FAIL: upload did not return a name. Response:"
-  printf '%s' "$UPLOAD" | head -c 500
-  echo
-  exit 1
+  # Tolerate re-runs: if the file was already uploaded, reuse its name.
+  if printf '%s' "$UPLOAD" | grep -qi "already exists"; then
+    NAME=$(basename "$SAMPLE")
+    echo "(dataset already uploaded — reusing '$NAME')"
+    printf '%s' "$UPLOAD" | python3 -c \
+      "import sys,json;d=json.load(sys.stdin);print('Upload response (reused):',d.get('detail',d))" 2>/dev/null || true
+  else
+    echo "FAIL: upload did not return a name. Response:"
+    printf '%s' "$UPLOAD" | head -c 500
+    echo
+    exit 1
+  fi
+else
+  printf '%s' "$UPLOAD" | python3 -c \
+    "import sys,json;d=json.load(sys.stdin);print('Uploaded:',d['name'],'| rows:',d['rows'],'| size:',round(d['size_bytes']/1e6,1),'MB')"
 fi
-printf '%s' "$UPLOAD" | python3 -c \
-  "import sys,json;d=json.load(sys.stdin);print('Uploaded:',d['name'],'| rows:',d['rows'],'| size:',round(d['size_bytes']/1e6,1),'MB')"
 
 # --- 5. Ingest (appends to the corpus, never wipes) -----------------------------
 say "5. Ingesting sample (limit=$INGEST_LIMIT)"
@@ -111,7 +120,8 @@ for i in $(seq 1 80); do
   sleep 15
 done
 printf '%s' "$STATUS" | python3 -c \
-  "import sys,json;p=json.load(sys.stdin)['progress'];print('Result: inserted=',p['inserted_rows'],'attack flows=',p['attack_flows'],'alerts created=',p['alerts_created'],'incidents created=',p['incidents_created']);print('Error:',p['last_error'] or 'none')"
+  "import sys,json;p=json.load(sys.stdin)['progress'];print('Result: inserted=',p['inserted_rows'],'attack flows=',p['attack_flows'],'alerts created=',p['alerts_created'],'incidents created=',p['incidents_created']);print('Error:',p['last_error'] or 'none')" 2>/dev/null \
+  || echo "  (could not parse final status — ingestion may still be running)"
 
 # --- 7. Post-ingest dashboard summary ---------------------------------------------
 say "7. Post-ingest dashboard summary"

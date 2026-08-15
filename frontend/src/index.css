@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-night-950 text-slate-200 antialiased;
+  }
+  body {
+    @apply min-h-screen font-sans;
+    background-image: linear-gradient(rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+      radial-gradient(1200px 600px at 20% -10%, rgba(14, 165, 233, 0.12), transparent 60%),
+      radial-gradient(1000px 500px at 90% 110%, rgba(167, 139, 250, 0.1), transparent 60%);
+    background-size: 44px 44px, 44px 44px, 100% 100%, 100% 100%;
+    background-attachment: fixed;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded bg-night-700;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply rounded-xl border border-night-700/80 bg-night-900/70 shadow-panel backdrop-blur;
+  }
+  .glass-hover {
+    @apply transition-all duration-200 hover:border-electric-500/50 hover:shadow-glow;
+  }
+  .kpi-value {
+    @apply font-mono text-3xl font-semibold tracking-tight;
+  }
+  .nav-item {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-400 transition-colors hover:bg-night-800 hover:text-slate-100;
+  }
+  .nav-item.active {
+    @apply bg-electric-500/10 text-electric-400 shadow-glow;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-electric-500 text-white hover:bg-electric-400 hover:shadow-glow;
+  }
+  .btn-ghost {
+    @apply btn border border-night-700 text-slate-300 hover:border-electric-500/50 hover:text-white;
+  }
+  .btn-danger {
+    @apply btn bg-cyber-red/90 text-white hover:bg-cyber-red;
+  }
+  .input {
+    @apply w-full rounded-lg border border-night-700 bg-night-850 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-electric-500 focus:shadow-glow;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500;
+  }
+  .table-base {
+    @apply w-full text-left text-sm;
+  }
+  .table-base thead th {
+    @apply border-b border-night-700 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500;
+  }
+  .table-base tbody td {
+    @apply border-b border-night-800/60 px-4 py-3;
+  }
+  .table-base tbody tr {
+    @apply transition-colors hover:bg-night-800/40;
+  }
+  .skeleton {
+    @apply animate-pulse rounded-md bg-night-800;
+  }
+}
+
+@layer utilities {
+  .animate-pulse-slow {
+    animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .animate-pulse-slower {
+    animation: pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .bg-soc-grid {
+    background-image: linear-gradient(rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+}
+
+/* React Flow dark theme */
+.react-flow {
+  background: transparent;
+}
+.react-flow__node {
+  font-family: inherit;
+}
+.react-flow__edge-path {
+  stroke: #334155;
+  stroke-width: 1.6;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #38bdf8;
+}
+.react-flow__controls {
+  box-shadow: none;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #1a2540;
+}
+.react-flow__controls button {
+  background: #0d1526;
+  color: #94a3b8;
+  border-bottom: 1px solid #1a2540;
+}
+.react-flow__controls button:hover {
+  background: #111a30;
+}
+.react-flow__attribution {
+  background: transparent;
+  color: #334155;
+}

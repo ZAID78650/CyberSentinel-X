@@ -1,0 +1,67 @@
+# CyberSentinel X — Backend
+# Multi-stage build for optimized image size and faster layer caching.
+
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /tmp
+
+# Install build dependencies (only needed for wheel building)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements early for layer caching
+COPY backend/requirements.txt .
+RUN pip install --upgrade pip setuptools && \
+    pip install --user --no-warn-script-location -r requirements.txt
+
+# Production runtime stage
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH=/root/.local/bin:$PATH
+
+WORKDIR /app
+
+# Install only runtime dependencies (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/* && \
+    addgroup --gid 1000 appuser && \
+    adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
+
+# Copy pre-built wheels from builder
+COPY --from=builder /root/.local /root/.local
+COPY --from=builder /root/.local/bin /usr/local/bin
+
+# Copy application files
+COPY backend/alembic.ini .
+COPY backend/alembic ./alembic
+COPY backend/app ./app
+COPY backend/scripts ./scripts
+COPY backend/docker-entrypoint.sh /docker-entrypoint.sh
+
+# Create data directory and set permissions
+RUN mkdir -p /app/data && \
+    chmod +x /docker-entrypoint.sh && \
+    chmod +x /app/scripts/*.py 2>/dev/null || true && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+
+CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--timeout", "120", "--max-requests", "1000"]

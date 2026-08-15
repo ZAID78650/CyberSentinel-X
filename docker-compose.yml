@@ -1,0 +1,121 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: csx-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-cybersentinel}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cybersentinel}
+      POSTGRES_DB: ${DB_NAME:-cybersentinel}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-cybersentinel} -d ${DB_NAME:-cybersentinel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    networks:
+      - csx-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: csx-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${DB_USER:-cybersentinel}:${DB_PASSWORD:-cybersentinel}@postgres:5432/${DB_NAME:-cybersentinel}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-only-refresh-secret-change-me-in-production}
+      LLM_PROVIDER: ${LLM_PROVIDER:-local}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      VECTOR_DB_BACKEND: ${VECTOR_DB_BACKEND:-local}
+      VECTOR_DB_PATH: /app/data/vector_store
+      DOCKER_REGISTRY: ${DOCKER_REGISTRY:-fs22ai006/cybersentinel-x}
+      UNSW_DATASET_DIR: ${UNSW_DATASET_DIR:-/data/unsw-nb15}
+      UNSW_INGEST_LIMIT: ${UNSW_INGEST_LIMIT:-0}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      OPS_EMAIL: ${OPS_EMAIL:-}
+    volumes:
+      - backend-data:/app/data
+      - ${UNSW_DATASET_DIR:-./data/unsw-nb15}:/data/unsw-nb15:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "1"
+          memory: 512M
+    networks:
+      - csx-network
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/api}
+    container_name: csx-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256M
+        reservations:
+          cpus: "0.5"
+          memory: 128M
+    networks:
+      - csx-network
+    environment:
+      - NGINX_HOST=localhost
+      - NGINX_PORT=80
+
+volumes:
+  pgdata:
+    driver: local
+  backend-data:
+    driver: local
+
+networks:
+  csx-network:
+    driver: bridge

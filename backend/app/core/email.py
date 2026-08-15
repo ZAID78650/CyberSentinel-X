@@ -1,0 +1,125 @@
+"""SMTP email service.
+
+Configured via environment variables (see .env.example):
+
+    SMTP_HOST=smtp.gmail.com
+    SMTP_PORT=587
+    SMTP_USER=fs22ai006@gmail.com
+    SMTP_PASSWORD=<gmail app password>
+    EMAIL_FROM=CyberSentinel X <fs22ai006@gmail.com>
+    OPS_EMAIL=fs22ai006@gmail.com
+
+When SMTP_PASSWORD is empty the service degrades gracefully: senders log the
+message instead of failing, so the application keeps working without email.
+"""
+import logging
+import smtplib
+from email.message import EmailMessage
+from email.utils import formataddr
+from typing import Optional
+
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+
+def _smtp_settings():
+    s = get_settings()
+    return {
+        "host": s.smtp_host,
+        "port": s.smtp_port,
+        "user": s.smtp_user,
+        "password": s.smtp_password,
+        "from": s.email_from,
+    }
+
+
+def email_enabled() -> bool:
+    cfg = _smtp_settings()
+    return bool(cfg["host"] and cfg["user"] and cfg["password"])
+
+
+def send_email(
+    to: str,
+    subject: str,
+    body: str,
+    html: Optional[str] = None,
+    from_name: str = "CyberSentinel X",
+) -> bool:
+    """Send an email. Returns True on success; never raises."""
+    cfg = _smtp_settings()
+    if not email_enabled():
+        logger.info("[email] disabled — would send to=%s subject=%r", to, subject)
+        return False
+
+    msg = EmailMessage()
+    sender = cfg["from"] or formataddr((from_name, cfg["user"]))
+    msg["From"] = sender
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
+
+    try:
+        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=20) as server:
+            server.starttls()
+            server.login(cfg["user"], cfg["password"])
+            server.send_message(msg)
+        logger.info("[email] sent to=%s subject=%r", to, subject)
+        return True
+    except Exception as exc:  # pragma: no cover — depends on live SMTP
+        logger.warning("[email] send failed to=%s: %s", to, exc)
+        return False
+
+
+# --------------------------------------------------------------------------
+# Convenience senders used by the application
+# --------------------------------------------------------------------------
+
+def send_ops_alert(subject: str, body: str, html: Optional[str] = None) -> bool:
+    """Send an operational alert to the configured OPS_EMAIL."""
+    ops = get_settings().ops_email
+    if not ops:
+        return False
+    return send_email(ops, subject, body, html)
+
+
+def send_password_reset(to: str, reset_link: str) -> bool:
+    subject = "CyberSentinel X — Password reset requested"
+    body = (
+        "Hello,\n\n"
+        "A password reset was requested for your CyberSentinel X account.\n\n"
+        f"Reset link (valid 30 minutes): {reset_link}\n\n"
+        "If you did not request this, you can safely ignore this email.\n\n"
+        "— CyberSentinel X Security Operations"
+    )
+    html = f"""\
+<html><body style="font-family: -apple-system, Segoe UI, sans-serif; background:#0a1120; padding:24px">
+  <div style="max-width:520px;margin:auto;border:1px solid #1a2540;border-radius:12px;background:#0d1526;padding:24px">
+    <p style="font-size:20px;font-weight:700;color:#38bdf8;margin:0 0 12px">🛡️ CyberSentinel X</p>
+    <p style="color:#cbd5e1;font-size:14px">A password reset was requested for your account.</p>
+    <p style="margin:20px 0"><a href="{reset_link}" style="background:#38bdf8;color:#04121f;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:700">Reset my password</a></p>
+    <p style="color:#64748b;font-size:12px">Link valid 30 minutes. If you did not request this, ignore this email.</p>
+  </div>
+</body></html>"""
+    return send_email(to, subject, body, html)
+
+
+def send_incident_alert(incident_title: str, severity: str, incident_url: str, details: str) -> bool:
+    subject = f"[{severity}] CyberSentinel X incident: {incident_title}"
+    body = (
+        f"A {severity} incident was opened on CyberSentinel X:\n\n"
+        f"Title: {incident_title}\nDetails: {details}\n\n"
+        f"Open in the SOC: {incident_url}\n\n— CyberSentinel X"
+    )
+    html = f"""\
+<html><body style="font-family: -apple-system, Segoe UI, sans-serif; background:#0a1120; padding:24px">
+  <div style="max-width:520px;margin:auto;border:1px solid {('#7f1d1d' if severity=='CRITICAL' else '#1a2540')};border-radius:12px;background:#0d1526;padding:24px">
+    <p style="font-size:20px;font-weight:700;color:{('#f87171' if severity=='CRITICAL' else '#38bdf8')};margin:0 0 12px">🚨 {severity} · {incident_title}</p>
+    <p style="color:#cbd5e1;font-size:14px">{details}</p>
+    <p style="margin:20px 0"><a href="{incident_url}" style="background:#f87171;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:700">Open incident</a></p>
+    <p style="color:#64748b;font-size:12px">Auto-generated by CyberSentinel X.</p>
+  </div>
+</body></html>"""
+    return send_ops_alert(subject, body, html)

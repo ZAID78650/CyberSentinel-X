@@ -25,7 +25,7 @@ import hashlib
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -398,6 +398,21 @@ def _delete_by_incident_ids(db: Session, model, incident_ids, key: str = "incide
         db.execute(delete(model).where(getattr(model, key).in_(ids)))
 
 
+def _existing_event_ids(db: Session, ids: List[str]) -> Set[str]:
+    """Return which of ``ids`` already exist in the event store.
+
+    Chunked to stay under SQLite's variable limit with 5k-row batches.
+    """
+    found: Set[str] = set()
+    for i in range(0, len(ids), 400):
+        found.update(
+            db.scalars(
+                select(SecurityEvent.event_id).where(SecurityEvent.event_id.in_(ids[i : i + 400]))
+            ).all()
+        )
+    return found
+
+
 def ingest_unsw_files(
     paths: List[str],
     limit: int = 0,
@@ -439,6 +454,7 @@ def ingest_unsw_files(
 
         detector = None
         inserted = 0
+        new_event_ids: Set[str] = set()
         anomaly_events: List[Dict[str, Any]] = []
         seq = 0
         total_rows = 0
@@ -477,32 +493,46 @@ def ingest_unsw_files(
 
                 for start in range(0, len(scored), BULK):
                     chunk = scored[start : start + BULK]
-                    db.bulk_insert_mappings(
-                        SecurityEvent,
-                        [
-                            {
-                                "event_id": e["event_id"],
-                                "timestamp": e["timestamp"],
-                                "event_type": e["event_type"],
-                                "severity": e["severity"],
-                                "source_ip": e.get("source_ip"),
-                                "destination_ip": e.get("destination_ip"),
-                                "user_id": e.get("user_id"),
-                                "device_id": e.get("device_id"),
-                                "asset_id": e.get("asset_id"),
-                                "source": "unsw-bulk",
-                                "metadata_": e.get("metadata"),
-                                "anomaly_score": e.get("anomaly_score"),
-                                "is_anomalous": e.get("is_anomalous", False),
-                                "detection_reason": e.get("detection_reason"),
-                            }
-                            for e in chunk
-                        ],
-                    )
-                    db.commit()
-                    inserted += len(chunk)
-                    UNSW_STATE["processed_rows"] = inserted
+                    # Event ids are deterministic (unsw-{prefix}-{row}), so
+                    # re-ingesting an already-loaded dataset would collide on
+                    # the unique event_id index. Skip rows that already exist
+                    # to make re-runs idempotent instead of aborting the job.
+                    chunk_ids = [e["event_id"] for e in chunk]
+                    existing = _existing_event_ids(db, chunk_ids)
+                    fresh = [e for e in chunk if e["event_id"] not in existing]
+                    if fresh:
+                        db.bulk_insert_mappings(
+                            SecurityEvent,
+                            [
+                                {
+                                    "event_id": e["event_id"],
+                                    "timestamp": e["timestamp"],
+                                    "event_type": e["event_type"],
+                                    "severity": e["severity"],
+                                    "source_ip": e.get("source_ip"),
+                                    "destination_ip": e.get("destination_ip"),
+                                    "user_id": e.get("user_id"),
+                                    "device_id": e.get("device_id"),
+                                    "asset_id": e.get("asset_id"),
+                                    "source": "unsw-bulk",
+                                    "metadata_": e.get("metadata"),
+                                    "anomaly_score": e.get("anomaly_score"),
+                                    "is_anomalous": e.get("is_anomalous", False),
+                                    "detection_reason": e.get("detection_reason"),
+                                }
+                                for e in fresh
+                            ],
+                        )
+                        db.commit()
+                        inserted += len(fresh)
+                        new_event_ids.update(e["event_id"] for e in fresh)
+                        UNSW_STATE["processed_rows"] = inserted
                 del scored, events
+
+        # Only correlate flows that were actually inserted in this run, so
+        # re-ingesting an already-loaded dataset does not mint duplicate
+        # alerts/incidents for the same flows.
+        anomaly_events = [e for e in anomaly_events if e["event_id"] in new_event_ids]
 
         UNSW_STATE["inserted_rows"] = inserted
         UNSW_STATE["attack_flows"] = len(anomaly_events)

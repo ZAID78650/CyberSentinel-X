@@ -77,7 +77,18 @@ def login(max_tries=8):
             timeout=90,
         )
         if s == 200:
-            tok = json.loads(body).get("tokens", {}).get("access_token")
+            try:
+                tok = json.loads(body).get("tokens", {}).get("access_token")
+            except json.JSONDecodeError:
+                # body was truncated for display; re-login without truncation
+                req = urllib.request.Request(
+                    BASE + "/api/auth/login",
+                    data=json.dumps({"email": "admin@cybersentinel.io", "password": "Admin@2026"}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=90) as r:
+                    tok = json.loads(r.read().decode()).get("tokens", {}).get("access_token")
             print(f"[login] ok (try {i + 1})")
             return tok
         print(f"[login] try {i + 1}: {s} — waiting 20s")

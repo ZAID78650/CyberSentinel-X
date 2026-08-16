@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download, FileText, Github, KeyRound, Loader2, ShieldCheck, Unlink, User } from "lucide-react";
+import { Archive, Download, FileText, Github, KeyRound, Loader2, ShieldCheck, Unlink, User } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { Card, StatusBadge } from "../components/ui";
@@ -14,13 +14,16 @@ export default function Settings() {
   const [pwdOpen, setPwdOpen] = useState(false);
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwd, setPwd] = useState({ current_password: "", new_password: "", confirm_password: "" });
-  const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
+  const [exporting, setExporting] = useState<"json" | "csv" | "zip" | null>(null);
 
-  const handleExport = async (format: "json" | "csv") => {
+  const handleExport = async (format: "json" | "csv" | "zip") => {
     setExporting(format);
+    const msg = format === "zip" ? "Your full bundle (ZIP) is downloading."
+      : format === "csv" ? "Your audit trail (CSV) is downloading."
+      : "Your account data (JSON) is downloading.";
     try {
       await exportMyData(format);
-      success("Export downloaded", format === "csv" ? "Your audit trail (CSV) is downloading." : "Your account data (JSON) is downloading.");
+      success("Export downloaded", msg);
     } catch (err) {
       error("Export failed", getErrorMessage(err));
     } finally {
@@ -229,7 +232,7 @@ export default function Settings() {
       <Card title="Your data" subtitle="GDPR-style account export">
         <p className="text-sm text-slate-400">
           Download everything this account holds — profile, sign-in methods, registered
-          devices, your audit trail and incidents you created.
+          devices, your audit trail, incidents you created and evidence records.
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <button
@@ -247,6 +250,14 @@ export default function Settings() {
           >
             {exporting === "csv" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
             Audit trail (CSV)
+          </button>
+          <button
+            onClick={() => handleExport("zip")}
+            disabled={exporting !== null}
+            className="flex items-center gap-1.5 rounded-md border border-cyber-purple/40 px-3 py-2 text-xs font-semibold text-cyber-purple transition hover:bg-cyber-purple/10 disabled:opacity-50"
+          >
+            {exporting === "zip" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
+            Full bundle (ZIP)
           </button>
         </div>
         <p className="mt-3 text-xs text-slate-600">

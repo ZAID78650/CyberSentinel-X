@@ -10,6 +10,7 @@ export interface User {
   last_login_at?: string | null;
   oauth_provider?: string | null;
   has_password?: boolean;
+  sso_blocked?: boolean;
   created_at?: string | null;
   roles: string[];
 }

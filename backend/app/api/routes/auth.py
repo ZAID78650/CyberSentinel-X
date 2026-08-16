@@ -1,4 +1,6 @@
 """Authentication routes."""
+import hashlib
+import hmac
 import json
 import uuid
 from datetime import datetime, timezone
@@ -24,6 +26,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserOut,
     UserRolesUpdate,
+    UserSsoBlockUpdate,
     UserStatusUpdate,
 )
 from app.services.auth_service import AuthError, authenticate, build_tokens, refresh_access_token, register
@@ -146,7 +149,7 @@ def _iso(v) -> Optional[str]:
 
 @router.get("/me/export")
 def export_my_data(
-    fmt: str = Query("json", pattern="^(json|csv)$"),
+    fmt: str = Query("json", pattern="^(json|csv|zip)$"),
     request: Request = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -216,6 +219,57 @@ def export_my_data(
         "audit_events": audit,
         "incidents": incidents,
     }
+    if fmt == "zip":
+        from app.models.forensics import EvidenceRecord
+        import csv
+        import io as _io
+        import zipfile
+
+        evidence = [
+            {
+                "evidence_id": e.evidence_id, "evidence_type": e.evidence_type, "title": e.title,
+                "description": e.description, "chain_index": e.chain_index, "status": e.status,
+                "data_source": e.data_source, "record_hash": e.record_hash, "created_by": e.created_by,
+                "created_at": _iso(e.created_at),
+            }
+            for e in db.scalars(select(EvidenceRecord)
+                                .where(EvidenceRecord.created_by == user.email)
+                                .order_by(EvidenceRecord.created_at.desc())).all()
+        ]
+
+        csv_buf = _io.StringIO()
+        w = csv.writer(csv_buf)
+        w.writerow(["created_at", "action", "target_type", "target_id", "detail", "ip_address", "request_id"])
+        for a in audit:
+            w.writerow([a["created_at"], a["action"], a["target_type"], a["target_id"],
+                        json.dumps(a["detail"]) if a["detail"] else "", a["ip_address"], a["request_id"]])
+
+        counts = f"""
+        <p>Devices: {len(devices)} · Audit events: {len(audit)} · Incidents: {len(incidents)} · Evidence records: {len(evidence)}</p>
+        """.strip()
+        summary = f"""<!doctype html><html><head><meta charset="utf-8"><title>Account export — {user.email}</title>
+        <style>body{{font-family:system-ui,sans-serif;max-width:720px;margin:2rem auto;color:#111}}h1{{font-size:1.3rem}}
+table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ddd;padding:6px 8px;text-align:left;font-size:.85rem}}code{{background:#f4f4f4;padding:1px 4px}}</style></head><body>
+        <h1>CyberSentinel X — account data export</h1>
+        <p>Exported {payload['exported_at']} · {user.email} · roles: {', '.join(profile['roles'])}</p>
+        {counts}
+        <h2>Recent audit events</h2>
+        <table><tr><th>Time</th><th>Action</th><th>Target</th><th>IP</th></tr>
+        {''.join(f"<tr><td>{a['created_at'] or ''}</td><td><code>{a['action']}</code></td><td>{a['target_type'] or ''} {a['target_id'] or ''}</td><td>{a['ip_address'] or ''}</td></tr>" for a in audit[:25])}
+        </table></body></html>"""
+
+        zf_buf = _io.BytesIO()
+        with zipfile.ZipFile(zf_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("account.json", json.dumps(payload, indent=2, default=str))
+            zf.writestr("audit.csv", csv_buf.getvalue())
+            zf.writestr("evidence.json", json.dumps(evidence, indent=2, default=str))
+            zf.writestr("summary.html", summary)
+        return Response(
+            content=zf_buf.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="cybersentinel-bundle-{base_name}.zip"'},
+        )
+
     return Response(
         content=json.dumps(payload, indent=2, default=str),
         media_type="application/json",
@@ -228,6 +282,16 @@ def _get_user_or_404(db: Session, user_id: uuid.UUID) -> User:
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+def _signed_detail(detail: dict, actor: str, action: str) -> dict:
+    """Tamper-evident audit detail: HMAC-SHA256 over the canonical record."""
+    now = datetime.now(timezone.utc)
+    canonical = f"{actor}|{action}|{json.dumps(detail, sort_keys=True, default=str)}|{now.isoformat()}"
+    sig = hmac.new(
+        get_settings().jwt_secret.encode(), canonical.encode(), hashlib.sha256
+    ).hexdigest()
+    return {**detail, "_signed_at": now.isoformat(), "_sig": sig}
 
 
 @router.post("/users/{user_id}/status", response_model=UserOut)
@@ -270,6 +334,80 @@ def admin_reset_password(
     db.refresh(user)
     log_action(db, actor=admin.email, action="AUTH.USER_PASSWORD_RESET",
                target_type="user", target_id=str(user.id),
+               ip_address=get_client_ip(request))
+    return UserOut.model_validate(user)
+
+
+@router.post("/users/{user_id}/deprovision", response_model=UserOut)
+def deprovision_user(
+    user_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: archive an account and revoke every outstanding session.
+
+    Sets the account inactive, blocks SSO sign-in, and bumps token_version so
+    all previously issued access/refresh tokens immediately fail validation.
+    """
+    from app.services.audit import log_action
+    user = _get_user_or_404(db, user_id)
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="You cannot deprovision your own account.")
+    user.is_active = False
+    user.sso_blocked = True
+    user.token_version += 1
+    db.commit()
+    db.refresh(user)
+    detail = _signed_detail({"token_version": user.token_version, "is_active": False, "sso_blocked": True},
+                            admin.email, "AUTH.USER_DEPROVISIONED")
+    log_action(db, actor=admin.email, action="AUTH.USER_DEPROVISIONED",
+               target_type="user", target_id=str(user.id), detail=detail,
+               ip_address=get_client_ip(request))
+    return UserOut.model_validate(user)
+
+
+@router.post("/users/{user_id}/restore", response_model=UserOut)
+def restore_user(
+    user_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: re-enable a deprovisioned account. Old sessions stay revoked."""
+    from app.services.audit import log_action
+    user = _get_user_or_404(db, user_id)
+    user.is_active = True
+    user.sso_blocked = False
+    db.commit()
+    db.refresh(user)
+    detail = _signed_detail({"token_version": user.token_version, "is_active": True, "sso_blocked": False},
+                            admin.email, "AUTH.USER_RESTORED")
+    log_action(db, actor=admin.email, action="AUTH.USER_RESTORED",
+               target_type="user", target_id=str(user.id), detail=detail,
+               ip_address=get_client_ip(request))
+    return UserOut.model_validate(user)
+
+
+@router.post("/users/{user_id}/sso-block", response_model=UserOut)
+def set_user_sso_block(
+    user_id: uuid.UUID,
+    req: UserSsoBlockUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: block SSO sign-in for an account while password login stays active."""
+    from app.services.audit import log_action
+    user = _get_user_or_404(db, user_id)
+    if user.id == admin.id and req.blocked:
+        raise HTTPException(status_code=400, detail="You cannot block SSO on your own account.")
+    user.sso_blocked = req.blocked
+    db.commit()
+    db.refresh(user)
+    detail = _signed_detail({"blocked": req.blocked}, admin.email, "AUTH.USER_SSO_BLOCKED")
+    log_action(db, actor=admin.email, action="AUTH.USER_SSO_BLOCKED",
+               target_type="user", target_id=str(user.id), detail=detail,
                ip_address=get_client_ip(request))
     return UserOut.model_validate(user)
 

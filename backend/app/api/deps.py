@@ -28,6 +28,9 @@ def get_current_user(
     user = get_user_with_roles(db, to_uuid(payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or disabled")
+    # Session revocation: tokens issued before the last deprovisioning are dead.
+    if payload.get("ver", 0) != user.token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked. Sign in again.")
     return user
 
 

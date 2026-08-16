@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Table, Text, UniqueConstraint, Column
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin, utcnow
@@ -46,6 +46,11 @@ class User(Base, UUIDMixin, TimestampMixin):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     oauth_provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     oauth_provider_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Session revocation: every token carries the user's version at issue time;
+    # bumping it invalidates all outstanding sessions (deprovisioning).
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Blocks SSO sign-in for this account even while password login stays active.
+    sso_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     roles: Mapped[List[Role]] = relationship(secondary=user_roles, back_populates="users")
     devices: Mapped[List["Device"]] = relationship(back_populates="user", cascade="all, delete-orphan")

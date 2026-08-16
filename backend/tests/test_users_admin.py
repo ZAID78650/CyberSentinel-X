@@ -1,4 +1,5 @@
 """Admin user view + per-account password management tests."""
+import json
 
 from sqlalchemy import delete, func, select
 
@@ -321,3 +322,90 @@ def test_export_requires_auth(client):
 def test_export_rejects_bad_format(client, admin_headers):
     r = client.get("/api/auth/me/export?fmt=xml", headers=admin_headers)
     assert r.status_code == 422
+
+
+def test_export_zip_bundle(client, admin_headers):
+    import io
+    import zipfile
+    r = client.get("/api/auth/me/export?fmt=zip", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/zip")
+    assert "cybersentinel-bundle-admin.zip" in r.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        names = set(zf.namelist())
+        assert {"account.json", "audit.csv", "evidence.json", "summary.html"} <= names
+        summary = zf.read("summary.html").decode()
+        assert "account data export" in summary.lower()
+        account = json.loads(zf.read("account.json"))
+        assert account["account"]["email"] == "admin@cybersentinel.io"
+
+
+def test_deprovision_revokes_sessions_and_restore(client, admin_headers, db_session):
+    """Deprovisioning archives the account and revokes ALL outstanding tokens;
+    restore re-enables it but old sessions stay dead."""
+    from app.core.security import hash_password
+    from app.models.investigation import ActionLog
+    user = _create_user(db_session, "depro.test@cybersentinel.io", hash_password("Depro@2026"))
+    uid = str(user.id)
+    try:
+        r = client.post("/api/auth/login", json={"email": "depro.test@cybersentinel.io", "password": "Depro@2026"})
+        assert r.status_code == 200, r.text
+        tok, refresh = r.json()["tokens"]["access_token"], r.json()["tokens"]["refresh_token"]
+        headers = {"Authorization": f"Bearer {tok}"}
+        assert client.get("/api/auth/me", headers=headers).status_code == 200
+
+        # Deprovision: archive + revoke
+        r = client.post(f"/api/auth/users/{uid}/deprovision", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["is_active"] is False and body["sso_blocked"] is True
+
+        # Existing access token is dead
+        assert client.get("/api/auth/me", headers=headers).status_code == 401
+        # Existing refresh token is dead
+        assert client.post("/api/auth/refresh", json={"refresh_token": refresh}).status_code == 401
+        # Password login is blocked
+        assert client.post("/api/auth/login",
+                           json={"email": "depro.test@cybersentinel.io", "password": "Depro@2026"}).status_code == 403
+
+        # Admin cannot deprovision self
+        me = client.get("/api/auth/me", headers=admin_headers).json()
+        assert client.post(f"/api/auth/users/{me['id']}/deprovision", headers=admin_headers).status_code == 400
+
+        # Signed audit record
+        rec = db_session.scalar(select(ActionLog).where(
+            ActionLog.action == "AUTH.USER_DEPROVISIONED", ActionLog.target_id == uid))
+        assert rec is not None
+        assert rec.detail and rec.detail.get("_sig") and rec.detail.get("_signed_at")
+
+        # Restore re-enables; fresh login works; old tokens stay revoked
+        r = client.post(f"/api/auth/users/{uid}/restore", headers=admin_headers)
+        assert r.status_code == 200
+        assert r.json()["is_active"] is True and r.json()["sso_blocked"] is False
+        assert client.get("/api/auth/me", headers=headers).status_code == 401  # old token still dead
+        r = client.post("/api/auth/login",
+                        json={"email": "depro.test@cybersentinel.io", "password": "Depro@2026"})
+        assert r.status_code == 200, r.text
+    finally:
+        db_session.execute(delete(ActionLog).where(ActionLog.target_id == uid))
+        db_session.execute(delete(User).where(User.id == user.id))
+        db_session.commit()
+
+
+def test_sso_block_toggle(client, admin_headers, db_session):
+    from app.core.security import hash_password
+    user = _create_user(db_session, "sso.toggle@example.com", hash_password("Toggle@2026"))
+    uid = str(user.id)
+    try:
+        r = client.post(f"/api/auth/users/{uid}/sso-block", headers=admin_headers, json={"blocked": True})
+        assert r.status_code == 200
+        assert r.json()["sso_blocked"] is True
+        # password login still works while SSO is blocked
+        assert client.post("/api/auth/login",
+                           json={"email": "sso.toggle@example.com", "password": "Toggle@2026"}).status_code == 200
+        # unblock
+        r = client.post(f"/api/auth/users/{uid}/sso-block", headers=admin_headers, json={"blocked": False})
+        assert r.status_code == 200 and r.json()["sso_blocked"] is False
+    finally:
+        db_session.execute(delete(User).where(User.id == user.id))
+        db_session.commit()

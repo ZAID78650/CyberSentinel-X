@@ -277,6 +277,8 @@ async def callback(
             raise HTTPException(status_code=404, detail="Target account not found.")
         if not target.is_active:
             raise HTTPException(status_code=403, detail="Account is disabled")
+        if target.sso_blocked:
+            raise HTTPException(status_code=403, detail="SSO sign-in is blocked for this account.")
         existing = db.scalar(select(User).where(
             User.oauth_provider == provider, User.oauth_provider_id == provider_id))
         if existing is not None and existing.id != target.id:
@@ -348,6 +350,8 @@ async def callback(
         created = True
     elif not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
+    elif user.sso_blocked:
+        raise HTTPException(status_code=403, detail="SSO sign-in is blocked for this account.")
     else:
         # Account linking: bind the provider identity to the existing account.
         # Idempotent for repeat logins of an already-linked account.

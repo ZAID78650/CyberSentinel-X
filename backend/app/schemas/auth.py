@@ -93,6 +93,7 @@ class UserOut(BaseModel):
     last_login_at: Optional[datetime] = None
     oauth_provider: Optional[str] = None
     has_password: bool = False
+    sso_blocked: bool = False
     created_at: Optional[datetime] = None
     roles: List[str] = []
 
@@ -132,6 +133,11 @@ class AdminPasswordReset(BaseModel):
 class UserRolesUpdate(BaseModel):
     """Admin: replace the roles on an account."""
     roles: List[str] = Field(min_length=1)
+
+
+class UserSsoBlockUpdate(BaseModel):
+    """Admin: block or allow SSO sign-in for an account."""
+    blocked: bool
 
 
 class ForgotPasswordRequest(BaseModel):

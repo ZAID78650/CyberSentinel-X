@@ -176,7 +176,22 @@ export async function updateUserRoles(userId: string, roles: string[]): Promise<
   return res.data;
 }
 
-export async function exportMyData(format: "json" | "csv"): Promise<void> {
+export async function deprovisionUser(userId: string): Promise<User> {
+  const res = await api.post<User>(`/auth/users/${userId}/deprovision`);
+  return res.data;
+}
+
+export async function restoreUser(userId: string): Promise<User> {
+  const res = await api.post<User>(`/auth/users/${userId}/restore`);
+  return res.data;
+}
+
+export async function setUserSsoBlock(userId: string, blocked: boolean): Promise<User> {
+  const res = await api.post<User>(`/auth/users/${userId}/sso-block`, { blocked });
+  return res.data;
+}
+
+export async function exportMyData(format: "json" | "csv" | "zip"): Promise<void> {
   const res = await api.get(`/auth/me/export?fmt=${format}`, { responseType: "blob" });
   const disposition = String(res.headers["content-disposition"] ?? "");
   const match = disposition.match(/filename="?([^";]+)"?/);

@@ -173,6 +173,34 @@ def test_callback_userinfo_http_error(client, oauth_configured, mock_httpx):
     assert r.status_code == 401
 
 
+def test_callback_rejects_sso_blocked_user(client, oauth_configured, mock_httpx, db_session):
+    """Admins can block SSO for an account; the callback refuses to sign it in."""
+    from app.core.security import hash_password
+    from app.services.auth_service import get_or_create_role
+    u = User(email="blocked.sso@example.com", full_name="Blocked SSO",
+             password_hash=hash_password("x"), is_verified=True, sso_blocked=True)
+    u.roles.append(get_or_create_role(db_session, "SECURITY_ANALYST"))
+    db_session.add(u)
+    db_session.commit()
+    try:
+        mock_httpx.mock("POST", "https://oauth2.googleapis.com/token", {"access_token": "tok"})
+        mock_httpx.mock(
+            "GET", "https://www.googleapis.com/oauth2/v2/userinfo",
+            {"id": "g-blocked", "email": "blocked.sso@example.com",
+             "email_verified": True, "name": "Blocked SSO"},
+        )
+        _authorize(client, "google")
+        r = client.get(
+            "/api/auth/oauth/google/callback",
+            params={"code": "code-blocked", "state": client.cookies.get("csx_oauth_state")},
+        )
+        assert r.status_code == 403
+        assert "blocked" in r.json()["detail"].lower()
+    finally:
+        db_session.delete(u)
+        db_session.commit()
+
+
 def test_callback_rejects_state_mismatch(client, oauth_configured):
     r = client.get(
         "/api/auth/oauth/google/callback",

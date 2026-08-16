@@ -38,7 +38,7 @@ def create_access_token(subject: str, extra: Optional[Dict[str, Any]] = None) ->
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(subject: str) -> str:
+def create_refresh_token(subject: str, extra: Optional[Dict[str, Any]] = None) -> str:
     """Create a long-lived JWT refresh token."""
     now = datetime.now(timezone.utc)
     payload = {
@@ -48,6 +48,8 @@ def create_refresh_token(subject: str) -> str:
         "type": "refresh",
         "jti": secrets.token_urlsafe(24),
     }
+    if extra:
+        payload.update(extra)
     return jwt.encode(payload, settings.jwt_refresh_secret, algorithm=settings.jwt_algorithm)
 
 

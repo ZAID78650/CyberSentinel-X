@@ -90,8 +90,11 @@ def authenticate(db: Session, req: LoginRequest, ip: Optional[str] = None, reque
 
 
 def build_tokens(user: User, remember_me: bool = False):
-    access = create_access_token(str(user.id), extra={"roles": user.role_names, "email": user.email})
-    refresh = create_refresh_token(str(user.id))
+    # `ver` binds every token to the user's current token_version, so
+    # deprovisioning (which bumps it) revokes all outstanding sessions.
+    access = create_access_token(str(user.id), extra={
+        "roles": user.role_names, "email": user.email, "ver": user.token_version})
+    refresh = create_refresh_token(str(user.id), extra={"ver": user.token_version})
     return {
         "access_token": access,
         "refresh_token": refresh,
@@ -108,6 +111,9 @@ def refresh_access_token(db: Session, refresh_token: str, ip: Optional[str] = No
     user = db.get(User, to_uuid(payload["sub"]))
     if user is None or not user.is_active:
         raise AuthError("User not found or disabled", 401)
+    # A bumped token_version (deprovisioning) revokes this refresh token too.
+    if payload.get("ver", 0) != user.token_version:
+        raise AuthError("Session revoked. Sign in again.", 401)
     log_action(db, actor=user.email, action="AUTH.TOKEN_REFRESH", target_type="user", target_id=str(user.id),
                ip_address=ip)
     return build_tokens(user)

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Chrome, Check, Github, KeyRound, Loader2, Lock, Pencil, Power, ShieldAlert,
-  ShieldCheck, UserCheck, Users, X,
+  Archive, Check, Chrome, Github, KeyRound, Loader2, Lock, Pencil, Power,
+  RotateCcw, ShieldAlert, ShieldCheck, ShieldOff, UserCheck, Users, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { Card, StatusBadge } from "../components/ui";
 import {
-  adminResetPassword, getErrorMessage, listUsers, setUserStatus, updateUserRoles,
+  adminResetPassword, deprovisionUser, getErrorMessage, listUsers, restoreUser,
+  setUserSsoBlock, setUserStatus, updateUserRoles,
 } from "../services/api";
 import type { User } from "../types";
 
@@ -105,6 +106,28 @@ export default function AdminUsers() {
     setEditingId(null);
   };
 
+  const handleDeprovision = async (u: User) => {
+    if (!window.confirm(
+      `Deprovision ${u.email}? This archives the account, blocks SSO and revokes ALL of their sessions.`)) return;
+    setBusyId(u.id);
+    await apply(deprovisionUser(u.id), `${u.email} deprovisioned — all sessions revoked.`);
+    setBusyId(null);
+    setEditingId(null);
+  };
+
+  const handleRestore = async (u: User) => {
+    setBusyId(u.id);
+    await apply(restoreUser(u.id), `${u.email} restored.`);
+    setBusyId(null);
+    setEditingId(null);
+  };
+
+  const handleBlockSso = async (u: User, blocked: boolean) => {
+    setBusyId(u.id);
+    await apply(setUserSsoBlock(u.id, blocked), `${u.email} SSO ${blocked ? "blocked" : "enabled"}.`);
+    setBusyId(null);
+  };
+
   const toggleRole = (role: string) =>
     setEditRoles((rs) => (rs.includes(role) ? rs.filter((r) => r !== role) : [...rs, role]));
 
@@ -196,6 +219,9 @@ export default function AdminUsers() {
                     onPwdChange={setEditPwd}
                     onResetPassword={() => handleResetPassword(u)}
                     onSaveRoles={() => handleSaveRoles(u)}
+                    onDeprovision={() => handleDeprovision(u)}
+                    onRestore={() => handleRestore(u)}
+                    onBlockSso={(blocked: boolean) => handleBlockSso(u, blocked)}
                   />
                 ))}
               </tbody>
@@ -222,6 +248,9 @@ interface RowProps {
   onPwdChange: (v: string) => void;
   onResetPassword: () => void;
   onSaveRoles: () => void;
+  onDeprovision: () => void;
+  onRestore: () => void;
+  onBlockSso: (blocked: boolean) => void;
 }
 
 function Row(props: RowProps) {
@@ -251,8 +280,9 @@ function Row(props: RowProps) {
         <td className="py-3 pr-4"><MethodBadge u={u} /></td>
         <td className="py-3 pr-4">
           <span className={`text-xs font-medium ${u.is_active ? "text-emerald-400" : "text-cyber-red"}`}>
-            {u.is_active ? "Active" : "Disabled"}
+            {u.is_active ? "Active" : "Deprovisioned"}
             {u.is_verified ? "" : " · Unverified"}
+            {u.sso_blocked ? " · SSO blocked" : ""}
           </span>
         </td>
         <td className="py-3 pr-4 text-xs text-slate-500">
@@ -345,10 +375,46 @@ function Row(props: RowProps) {
                   Cancel
                 </button>
               </div>
+              <div className="min-w-[220px]">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">Account lifecycle</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className={`flex cursor-pointer items-center gap-1.5 text-xs ${isSelf ? "text-slate-600" : "text-slate-300"}`}>
+                    <input
+                      type="checkbox"
+                      checked={u.sso_blocked ?? false}
+                      onChange={() => props.onBlockSso(!u.sso_blocked)}
+                      disabled={busy || isSelf}
+                      className="h-3.5 w-3.5 accent-cyber-yellow"
+                    />
+                    <ShieldOff className="h-3 w-3" />
+                    Block SSO sign-in
+                  </label>
+                  {u.is_active ? (
+                    <button
+                      onClick={props.onDeprovision}
+                      disabled={busy || isSelf}
+                      className="flex items-center gap-1 rounded-md border border-cyber-red/50 px-2.5 py-1.5 text-[11px] font-semibold text-cyber-red transition hover:bg-cyber-red/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />}
+                      Deprovision · revoke sessions
+                    </button>
+                  ) : (
+                    <button
+                      onClick={props.onRestore}
+                      disabled={busy}
+                      className="flex items-center gap-1 rounded-md border border-emerald-500/40 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-400 transition hover:bg-emerald-500/10 disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                      Restore account
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
             <p className="mt-2 text-[11px] text-slate-600">
               <ShieldCheck className="mr-1 inline h-3 w-3" />
-              You cannot disable or demote your own account; removing the last ADMIN is blocked server-side.
+              You cannot disable, demote or deprovision your own account; removing the last ADMIN is blocked
+              server-side. Every lifecycle action is written to the signed audit trail.
             </p>
           </td>
         </tr>

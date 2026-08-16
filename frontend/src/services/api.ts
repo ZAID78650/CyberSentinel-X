@@ -176,6 +176,21 @@ export async function updateUserRoles(userId: string, roles: string[]): Promise<
   return res.data;
 }
 
+export async function exportMyData(format: "json" | "csv"): Promise<void> {
+  const res = await api.get(`/auth/me/export?fmt=${format}`, { responseType: "blob" });
+  const disposition = String(res.headers["content-disposition"] ?? "");
+  const match = disposition.match(/filename="?([^";]+)"?/);
+  const filename = match?.[1] ?? `cybersentinel-export.${format === "csv" ? "csv" : "json"}`;
+  const url = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function completeOAuth(access: string, refresh: string): void {
   tokenStore.set({ access_token: access, refresh_token: refresh, token_type: "bearer", expires_in: 7 * 24 * 60 * 60 });
   window.dispatchEvent(new CustomEvent("auth:oauth"));

@@ -1,6 +1,6 @@
 """Admin user view + per-account password management tests."""
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 
 from app.models.user import User
 
@@ -261,3 +261,63 @@ def test_admin_endpoint_unknown_user_404(client, admin_headers):
     import uuid as _uuid
     r = client.post(f"/api/auth/users/{_uuid.uuid4()}/status", headers=admin_headers, json={"is_active": False})
     assert r.status_code == 404
+
+
+def test_export_json_bundle(client, admin_headers, db_session):
+    """GDPR-style export returns profile + devices + audit trail + incidents."""
+    from app.models.investigation import ActionLog
+    from app.models.security import Incident
+    from app.models.user import Device
+
+    admin = db_session.scalar(select(User).where(User.email == "admin@cybersentinel.io"))
+    db_session.add(Device(device_id="dev-export-1", user_id=admin.id, device_name="Test Laptop",
+                          os="macOS", browser="Chrome", ip_address="10.0.0.9", is_trusted=True))
+    db_session.add(ActionLog(actor="admin@cybersentinel.io", action="AUTH.TEST_RECORD",
+                             target_type="user", target_id="x", detail={"k": "v"}, ip_address="10.0.0.9"))
+    db_session.add(Incident(incident_id="INC-EXPORT-TEST", title="Export Test Incident",
+                            created_by="admin@cybersentinel.io"))
+    db_session.commit()
+    try:
+        r = client.get("/api/auth/me/export", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        assert "attachment" in r.headers["content-disposition"]
+        assert "cybersentinel-account-admin.json" in r.headers["content-disposition"]
+        body = r.json()
+        assert body["account"]["email"] == "admin@cybersentinel.io"
+        assert body["account"]["roles"] == ["ADMIN"]
+        assert body["account"]["has_password"] is True
+        assert any(d["device_id"] == "dev-export-1" for d in body["devices"])
+        assert any(a["action"] == "AUTH.TEST_RECORD" for a in body["audit_events"])
+        assert any(i["incident_id"] == "INC-EXPORT-TEST" for i in body["incidents"])
+    finally:
+        db_session.execute(delete(Device).where(Device.device_id == "dev-export-1"))
+        db_session.execute(delete(ActionLog).where(ActionLog.action == "AUTH.TEST_RECORD"))
+        db_session.execute(delete(Incident).where(Incident.incident_id == "INC-EXPORT-TEST"))
+        db_session.commit()
+
+    # The export itself is audited
+    from app.models.investigation import ActionLog as AL
+    count = db_session.scalar(select(func.count()).select_from(AL).where(
+        AL.actor == "admin@cybersentinel.io", AL.action == "AUTH.DATA_EXPORT"))
+    assert count and count >= 1
+
+
+def test_export_csv(client, admin_headers):
+    r = client.get("/api/auth/me/export?fmt=csv", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers["content-disposition"]
+    assert "cybersentinel-audit-admin.csv" in r.headers["content-disposition"]
+    lines = r.text.strip().splitlines()
+    assert lines[0].startswith("created_at,action")
+    assert any("AUTH.DATA_EXPORT" in line for line in lines)
+
+
+def test_export_requires_auth(client):
+    r = client.get("/api/auth/me/export")
+    assert r.status_code == 401
+
+
+def test_export_rejects_bad_format(client, admin_headers):
+    r = client.get("/api/auth/me/export?fmt=xml", headers=admin_headers)
+    assert r.status_code == 422

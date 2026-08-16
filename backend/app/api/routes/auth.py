@@ -1,8 +1,10 @@
 """Authentication routes."""
+import json
 import uuid
-from typing import List
+from datetime import datetime, timezone
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -10,7 +12,7 @@ from app.api.deps import get_client_ip, get_current_user, get_request_id, requir
 from app.core.database import get_db
 from app.core.rate_limit import RateLimiter
 from app.core.config import get_settings
-from app.models.user import Role, User
+from app.models.user import Device, Role, User
 from app.schemas.auth import (
     AdminPasswordReset,
     AuthResponse,
@@ -136,6 +138,89 @@ def list_users(db: Session = Depends(get_db), _: User = Depends(require_roles("A
         select(User).options(selectinload(User.roles)).order_by(User.created_at.desc())
     ).all()
     return [UserOut.model_validate(u) for u in users]
+
+
+def _iso(v) -> Optional[str]:
+    return v.isoformat() if v else None
+
+
+@router.get("/me/export")
+def export_my_data(
+    fmt: str = Query("json", pattern="^(json|csv)$"),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """GDPR-style export of everything this account holds: profile, devices,
+    the account's audit trail and incidents it created. JSON = full bundle;
+    CSV = flat audit-events export."""
+    from app.models.investigation import ActionLog
+    from app.models.security import Incident
+    from app.services.audit import log_action
+
+    profile = UserOut.model_validate(user).model_dump()
+
+    devices = [
+        {
+            "device_id": d.device_id, "device_name": d.device_name, "os": d.os,
+            "browser": d.browser, "ip_address": d.ip_address, "location": d.location,
+            "is_trusted": d.is_trusted, "first_seen": _iso(d.first_seen), "last_seen": _iso(d.last_seen),
+        }
+        for d in db.scalars(select(Device).where(Device.user_id == user.id)
+                            .order_by(Device.last_seen.desc())).all()
+    ]
+
+    audit = [
+        {
+            "created_at": _iso(a.created_at), "action": a.action, "target_type": a.target_type,
+            "target_id": a.target_id, "detail": a.detail, "ip_address": a.ip_address,
+            "request_id": a.request_id,
+        }
+        for a in db.scalars(select(ActionLog).where(ActionLog.actor == user.email)
+                            .order_by(ActionLog.created_at.desc())).all()
+    ]
+
+    incidents = [
+        {
+            "incident_id": i.incident_id, "title": i.title, "severity": i.severity,
+            "status": i.status, "category": i.category, "risk_score": i.risk_score,
+            "created_at": _iso(i.created_at),
+        }
+        for i in db.scalars(select(Incident).where(Incident.created_by == user.email)
+                            .order_by(Incident.created_at.desc())).all()
+    ]
+
+    log_action(db, actor=user.email, action="AUTH.DATA_EXPORT", target_type="user", target_id=str(user.id),
+               ip_address=get_client_ip(request) if request else None)
+
+    base_name = user.email.split("@")[0].replace(".", "-")
+    if fmt == "csv":
+        import csv
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["created_at", "action", "target_type", "target_id", "detail", "ip_address", "request_id"])
+        for a in audit:
+            w.writerow([a["created_at"], a["action"], a["target_type"], a["target_id"],
+                        json.dumps(a["detail"]) if a["detail"] else "", a["ip_address"], a["request_id"]])
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="cybersentinel-audit-{base_name}.csv"'},
+        )
+
+    payload = {
+        "exported_at": _iso(datetime.now(timezone.utc)),
+        "account": profile,
+        "devices": devices,
+        "audit_events": audit,
+        "incidents": incidents,
+    }
+    return Response(
+        content=json.dumps(payload, indent=2, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="cybersentinel-account-{base_name}.json"'},
+    )
 
 
 def _get_user_or_404(db: Session, user_id: uuid.UUID) -> User:

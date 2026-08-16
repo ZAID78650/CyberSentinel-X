@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Github, KeyRound, Loader2, ShieldCheck, Unlink, User } from "lucide-react";
+import { Download, FileText, Github, KeyRound, Loader2, ShieldCheck, Unlink, User } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { Card, StatusBadge } from "../components/ui";
-import { getErrorMessage, oauthLink, oauthProviders, oauthUnlink, setPassword } from "../services/api";
+import { exportMyData, getErrorMessage, oauthLink, oauthProviders, oauthUnlink, setPassword } from "../services/api";
 import type { OAuthProviderStatus } from "../types";
 
 export default function Settings() {
@@ -14,6 +14,19 @@ export default function Settings() {
   const [pwdOpen, setPwdOpen] = useState(false);
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwd, setPwd] = useState({ current_password: "", new_password: "", confirm_password: "" });
+  const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
+
+  const handleExport = async (format: "json" | "csv") => {
+    setExporting(format);
+    try {
+      await exportMyData(format);
+      success("Export downloaded", format === "csv" ? "Your audit trail (CSV) is downloading." : "Your account data (JSON) is downloading.");
+    } catch (err) {
+      error("Export failed", getErrorMessage(err));
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const isSsoOnly = user?.has_password === false;
 
@@ -210,6 +223,34 @@ export default function Settings() {
         <p className="mt-3 text-xs text-slate-600">
           Linking lets you sign in with Google or GitHub while keeping your password login.
           SSO-only accounts can set a password here — after that, unlinking the provider is allowed.
+        </p>
+      </Card>
+
+      <Card title="Your data" subtitle="GDPR-style account export">
+        <p className="text-sm text-slate-400">
+          Download everything this account holds — profile, sign-in methods, registered
+          devices, your audit trail and incidents you created.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            onClick={() => handleExport("json")}
+            disabled={exporting !== null}
+            className="flex items-center gap-1.5 rounded-md border border-electric-500/40 px-3 py-2 text-xs font-semibold text-electric-400 transition hover:bg-electric-500/10 disabled:opacity-50"
+          >
+            {exporting === "json" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Full export (JSON)
+          </button>
+          <button
+            onClick={() => handleExport("csv")}
+            disabled={exporting !== null}
+            className="flex items-center gap-1.5 rounded-md border border-night-600 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-night-700/60 disabled:opacity-50"
+          >
+            {exporting === "csv" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            Audit trail (CSV)
+          </button>
+        </div>
+        <p className="mt-3 text-xs text-slate-600">
+          Every export is recorded in the audit log (AUTH.DATA_EXPORT).
         </p>
       </Card>
 

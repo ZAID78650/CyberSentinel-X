@@ -1,9 +1,11 @@
 """Authentication routes."""
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_client_ip, get_current_user, get_request_id
+from app.api.deps import get_client_ip, get_current_user, get_request_id, require_roles
 from app.core.database import get_db
 from app.core.rate_limit import RateLimiter
 from app.core.config import get_settings
@@ -12,6 +14,7 @@ from app.schemas.auth import (
     AuthResponse,
     ForgotPasswordRequest,
     LoginRequest,
+    PasswordUpdateRequest,
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
@@ -85,6 +88,48 @@ def logout(request: Request, user: User = Depends(get_current_user)):
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return UserOut.model_validate(user)
+
+
+@router.post("/me/password", response_model=UserOut)
+def update_my_password(
+    req: PasswordUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Set or change the current account's password.
+
+    SSO-only accounts (empty hash) can set a password without proving the
+    old one; password accounts must verify the current password first.
+    """
+    from app.core.security import hash_password, verify_password
+    from app.services.audit import log_action
+
+    ip = get_client_ip(request)
+    if user.password_hash:
+        if not req.current_password or not verify_password(req.current_password, user.password_hash):
+            log_action(db, actor=user.email, action="AUTH.PASSWORD_CHANGE_FAILED",
+                       target_type="user", target_id=str(user.id), ip_address=ip)
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
+        action = "AUTH.PASSWORD_CHANGED"
+    else:
+        action = "AUTH.PASSWORD_SET"
+
+    user.password_hash = hash_password(req.new_password)
+    db.commit()
+    db.refresh(user)
+    log_action(db, actor=user.email, action=action, target_type="user", target_id=str(user.id),
+               ip_address=ip)
+    return UserOut.model_validate(user)
+
+
+@router.get("/users", response_model=List[UserOut])
+def list_users(db: Session = Depends(get_db), _: User = Depends(require_roles("ADMIN"))):
+    """Admin view of all accounts including their sign-in methods."""
+    users = db.scalars(
+        select(User).options(selectinload(User.roles)).order_by(User.created_at.desc())
+    ).all()
+    return [UserOut.model_validate(u) for u in users]
 
 
 @router.post("/forgot-password", status_code=200)

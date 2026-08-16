@@ -54,6 +54,11 @@ class User(Base, UUIDMixin, TimestampMixin):
     def role_names(self) -> List[str]:
         return [r.name for r in self.roles]
 
+    @property
+    def has_password(self) -> bool:
+        """True when a password is set (SSO-only accounts have an empty hash)."""
+        return bool(self.password_hash)
+
     def has_role(self, role: str) -> bool:
         return role in self.role_names
 

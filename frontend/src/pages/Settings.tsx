@@ -3,7 +3,7 @@ import { Github, KeyRound, Loader2, ShieldCheck, Unlink, User } from "lucide-rea
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { Card, StatusBadge } from "../components/ui";
-import { getErrorMessage, oauthLink, oauthProviders, oauthUnlink } from "../services/api";
+import { getErrorMessage, oauthLink, oauthProviders, oauthUnlink, setPassword } from "../services/api";
 import type { OAuthProviderStatus } from "../types";
 
 export default function Settings() {
@@ -11,6 +11,36 @@ export default function Settings() {
   const { success, error, info } = useToast();
   const [providers, setProviders] = useState<OAuthProviderStatus[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwd, setPwd] = useState({ current_password: "", new_password: "", confirm_password: "" });
+
+  const isSsoOnly = user?.has_password === false;
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pwd.new_password !== pwd.confirm_password) {
+      error("Passwords do not match", "Confirm your new password.");
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      await setPassword({
+        ...(isSsoOnly ? {} : { current_password: pwd.current_password }),
+        new_password: pwd.new_password,
+        confirm_password: pwd.confirm_password,
+      });
+      await refreshUser();
+      setPwdOpen(false);
+      setPwd({ current_password: "", new_password: "", confirm_password: "" });
+      success(isSsoOnly ? "Password set" : "Password updated",
+        isSsoOnly ? "You can now sign in with a password too." : "Your password has been changed.");
+    } catch (err) {
+      error("Password update failed", getErrorMessage(err));
+    } finally {
+      setPwdBusy(false);
+    }
+  };
 
   useEffect(() => {
     oauthProviders().then(setProviders).catch(() => undefined);
@@ -77,10 +107,74 @@ export default function Settings() {
 
       <Card title="Sign-in methods" subtitle="Password + social login (SSO)">
         <div className="space-y-2.5">
-          <div className="flex items-center gap-3 rounded-lg bg-night-850/60 px-4 py-2.5">
-            <span className="text-electric-400"><KeyRound className="h-4 w-4" /></span>
-            <span className="flex-1 text-sm text-slate-300">Password</span>
-            <span className="text-xs font-medium text-emerald-400">Active</span>
+          <div className="rounded-lg bg-night-850/60 px-4 py-2.5">
+            <div className="flex items-center gap-3">
+              <span className="text-electric-400"><KeyRound className="h-4 w-4" /></span>
+              <span className="flex-1 text-sm text-slate-300">Password</span>
+              {isSsoOnly ? (
+                <>
+                  <span className="text-xs font-medium text-slate-600">Not set · SSO only</span>
+                  <button
+                    type="button"
+                    onClick={() => setPwdOpen((o) => !o)}
+                    className="rounded-md border border-electric-500/40 px-2.5 py-1 text-xs font-medium text-electric-400 transition hover:bg-electric-500/10"
+                  >
+                    Set password
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs font-medium text-emerald-400">Active</span>
+                  <button
+                    type="button"
+                    onClick={() => setPwdOpen((o) => !o)}
+                    className="rounded-md border border-night-600 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-night-700/60"
+                  >
+                    Change
+                  </button>
+                </>
+              )}
+            </div>
+            {pwdOpen && (
+              <form onSubmit={handlePasswordSubmit} className="mt-3 space-y-2 border-t border-night-700/70 pt-3">
+                {!isSsoOnly && (
+                  <input
+                    type="password"
+                    placeholder="Current password"
+                    value={pwd.current_password}
+                    onChange={(e) => setPwd({ ...pwd, current_password: e.target.value })}
+                    className="w-full rounded-md border border-night-700 bg-night-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-electric-500/60 focus:outline-none"
+                    required
+                  />
+                )}
+                <input
+                  type="password"
+                  placeholder="New password (8+ chars, letters + numbers)"
+                  value={pwd.new_password}
+                  onChange={(e) => setPwd({ ...pwd, new_password: e.target.value })}
+                  className="w-full rounded-md border border-night-700 bg-night-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-electric-500/60 focus:outline-none"
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={pwd.confirm_password}
+                  onChange={(e) => setPwd({ ...pwd, confirm_password: e.target.value })}
+                  className="w-full rounded-md border border-night-700 bg-night-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-electric-500/60 focus:outline-none"
+                  required
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={pwdBusy}
+                    className="flex items-center gap-1.5 rounded-md bg-electric-500 px-3 py-1.5 text-xs font-semibold text-night-950 transition hover:bg-electric-400 disabled:opacity-50"
+                  >
+                    {pwdBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {isSsoOnly ? "Set password" : "Update password"}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
           {providers.map((p) => {
             const linked = user?.oauth_provider === p.provider;
@@ -115,7 +209,7 @@ export default function Settings() {
         </div>
         <p className="mt-3 text-xs text-slate-600">
           Linking lets you sign in with Google or GitHub while keeping your password login.
-          An SSO-only account (no password) cannot unlink its last provider.
+          SSO-only accounts can set a password here — after that, unlinking the provider is allowed.
         </p>
       </Card>
 

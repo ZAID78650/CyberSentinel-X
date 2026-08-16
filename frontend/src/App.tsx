@@ -40,6 +40,7 @@ import JudgeMode from "./pages/JudgeMode";
 import SBOM from "./pages/SBOM";
 import ThreatAnalyzer from "./pages/ThreatAnalyzer";
 import EntityDetail from "./pages/EntityDetail";
+import AdminUsers from "./pages/AdminUsers";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -103,6 +104,7 @@ export default function App() {
         <Route path="/sbom" element={<SBOM />} />
         <Route path="/threat-analyzer" element={<ThreatAnalyzer />} />
         <Route path="/entity/:entityType/:value" element={<EntityDetail />} />
+        <Route path="/admin/users" element={<AdminUsers />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
 

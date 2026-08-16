@@ -147,6 +147,20 @@ export async function oauthUnlink(provider: string): Promise<User> {
   return res.data;
 }
 
+export async function setPassword(payload: {
+  current_password?: string;
+  new_password: string;
+  confirm_password: string;
+}): Promise<User> {
+  const res = await api.post<User>("/auth/me/password", payload);
+  return res.data;
+}
+
+export async function listUsers(): Promise<User[]> {
+  const res = await api.get<User[]>("/auth/users");
+  return res.data;
+}
+
 export function completeOAuth(access: string, refresh: string): void {
   tokenStore.set({ access_token: access, refresh_token: refresh, token_type: "bearer", expires_in: 7 * 24 * 60 * 60 });
   window.dispatchEvent(new CustomEvent("auth:oauth"));

@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   ShieldHalf,
   Target,
+  UserCog,
   Users,
   X,
   Zap,
@@ -117,9 +118,17 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: strin
   },
 ];
 
+// Admin-only section appended to the sidebar for ADMIN accounts.
+const ADMIN_NAV_GROUP = {
+  label: "Administration",
+  items: [{ to: "/admin/users", label: "Users", icon: <UserCog className="h-4 w-4" /> }],
+};
+
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = user?.roles.includes("ADMIN") ?? false;
+  const groups = isAdmin ? [...NAV_GROUPS, ADMIN_NAV_GROUP] : NAV_GROUPS;
 
   const handleLogout = () => {
     logout();
@@ -142,7 +151,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
 
         <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
-          {NAV_GROUPS.map((group) => (
+          {groups.map((group) => (
             <div key={group.label}>
               <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
                 {group.label}
@@ -192,10 +201,12 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 function TopBar({ onMenu }: { onMenu: () => void }) {
   const { connected } = useWebSocket();
+  const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
-  const pageTitle = NAV_GROUPS.flatMap((g) => g.items).find((i) => i.to === location.pathname)?.label ?? "Console";
+  const groups = (user?.roles.includes("ADMIN") ?? false) ? [...NAV_GROUPS, ADMIN_NAV_GROUP] : NAV_GROUPS;
+  const pageTitle = groups.flatMap((g) => g.items).find((i) => i.to === location.pathname)?.label ?? "Console";
   void connected;
 
   const submitSearch = () => {

@@ -55,6 +55,32 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class PasswordUpdateRequest(BaseModel):
+    """Set a password on an SSO-only account, or change an existing one.
+
+    `current_password` is only required when a password already exists.
+    """
+    current_password: Optional[str] = Field(default=None, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one number")
+        if not any(c.isalpha() for c in v):
+            raise ValueError("Password must contain at least one letter")
+        return v
+
+    @field_validator("confirm_password")
+    @classmethod
+    def confirm_matches(cls, v: str, info) -> str:
+        if "new_password" in info.data and v != info.data["new_password"]:
+            raise ValueError("Passwords do not match")
+        return v
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -66,6 +92,8 @@ class UserOut(BaseModel):
     is_verified: bool
     last_login_at: Optional[datetime] = None
     oauth_provider: Optional[str] = None
+    has_password: bool = False
+    created_at: Optional[datetime] = None
     roles: List[str] = []
 
     @field_validator("roles", mode="before")

@@ -682,6 +682,20 @@ export interface ThreatPoint {
 
 export type DataProvenance = "LIVE" | "DATASET" | "SIMULATED" | "LOCAL" | "MODEL" | "UNKNOWN";
 
+export interface SessionItem {
+  device_id: string;
+  device_name?: string | null;
+  os?: string | null;
+  browser?: string | null;
+  ip_address?: string | null;
+  location?: string | null;
+  is_trusted: boolean;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  revoked: boolean;
+  current: boolean;
+}
+
 export interface EvidenceRecordItem {
   id: string;
   evidence_id: string;
@@ -697,6 +711,7 @@ export interface EvidenceRecordItem {
   data_source: string;
   created_by: string;
   verified_at?: string | null;
+  attachment?: { name: string; hash: string } | null;
   created_at: string;
   meta?: Record<string, unknown> | null;
 }

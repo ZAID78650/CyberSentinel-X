@@ -371,6 +371,10 @@ async def callback(
                ip_address=get_client_ip(request) if request else None)
 
     tokens = build_tokens(user, remember_me=True)
+    from app.services.auth_service import record_session
+    record_session(db, user, tokens["refresh_token"],
+                   ip=get_client_ip(request) if request else None,
+                   user_agent=request.headers.get("user-agent") if request else None)
     # Redirect back to the SPA with credentials in the URL fragment (never the
     # query string, so tokens don't land in server/referrer logs).
     fe = get_settings().frontend_url.rstrip("/")

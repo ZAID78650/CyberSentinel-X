@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  AlertTriangle, Boxes, CheckCircle2, Fingerprint, GitCommitHorizontal, Hash, Loader2, Lock, RefreshCw,
-  ShieldCheck, ShieldX, Trash2,
+  AlertTriangle, Boxes, CheckCircle2, Download, Fingerprint, GitCommitHorizontal, Hash, Loader2, Lock,
+  Paperclip, RefreshCw, ShieldCheck, ShieldX, Trash2,
 } from "lucide-react";
-import { api, getErrorMessage } from "../services/api";
+import { api, downloadEvidenceAttachment, getErrorMessage, uploadEvidenceAttachment } from "../services/api";
 import { Card, EmptyState, SeverityBadge, Skeleton, StatusBadge } from "../components/ui";
 import ProvenanceBadge from "../components/ui/ProvenanceBadge";
 import { useAuth } from "../contexts/AuthContext";
@@ -100,7 +100,30 @@ export default function EvidenceLedger() {
     }
   };
 
+  const handleAttach = async (evidenceId: string, file?: File) => {
+    if (!file) return;
+    setBusyId(evidenceId);
+    try {
+      await uploadEvidenceAttachment(evidenceId, file);
+      success("Attachment added", `${file.name} attached — SHA-256 stored with the record.`);
+      await load();
+    } catch (err) {
+      toastError("Upload failed", getErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDownload = async (evidenceId: string) => {
+    try {
+      await downloadEvidenceAttachment(evidenceId);
+    } catch (err) {
+      toastError("Download failed", getErrorMessage(err));
+    }
+  };
+
   const isAdmin = hasRole("ADMIN");
+  const canAttach = isAdmin || hasRole("SECURITY_ANALYST");
   const tampered = records.filter((r) => r.status === "TAMPERED").length;
   const integrityOk = report ? report.valid : tampered === 0;
 
@@ -281,9 +304,24 @@ export default function EvidenceLedger() {
                     <td className="py-2.5 pr-3 font-mono text-[10px] text-slate-500">#{r.chain_index}</td>
                     <td className="py-2.5 pr-3 text-[10px] text-slate-500">{new Date(r.created_at).toLocaleString()}</td>
                     <td className="py-2.5">
-                      {isAdmin && (
-                        <div className="flex gap-1">
-                          {r.status === "TAMPERED" ? (
+                      {canAttach && (
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          {r.attachment && (
+                            <>
+                              <button className="btn-ghost !px-2 !py-1 text-[10px]" onClick={() => handleDownload(r.evidence_id)} title={`${r.attachment.name} (sha256 ${r.attachment.hash.slice(0, 12)}…)`}>
+                                <Download className="h-3 w-3" /> {r.attachment.name.length > 12 ? `${r.attachment.name.slice(0, 12)}…` : r.attachment.name}
+                              </button>
+                            </>
+                          )}
+                          <label className="btn-ghost !cursor-pointer !px-2 !py-1 text-[10px]">
+                            <Paperclip className="h-3 w-3" /> Attach
+                            <input
+                              type="file"
+                              className="hidden"
+                              onChange={(e) => { void handleAttach(r.evidence_id, e.target.files?.[0]); e.target.value = ""; }}
+                            />
+                          </label>
+                          {isAdmin && (r.status === "TAMPERED" ? (
                             <button className="btn-ghost !px-2 !py-1 text-[10px]" onClick={() => restore(r.evidence_id)} disabled={busyId === r.id}>
                               {busyId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />} Restore
                             </button>
@@ -291,7 +329,7 @@ export default function EvidenceLedger() {
                             <button className="btn-ghost !px-2 !py-1 text-[10px]" onClick={() => tamperTest(r.evidence_id)} disabled={busyId === r.id} title="SIMULATION — mutate payload without updating hash to demo integrity detection">
                               {busyId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <AlertTriangle className="h-3 w-3" />} Tamper test
                             </button>
-                          )}
+                          ))}
                         </div>
                       )}
                     </td>
@@ -301,7 +339,7 @@ export default function EvidenceLedger() {
             </table>
           </div>
         )}
-        {!isAdmin && <p className="mt-3 text-[11px] text-slate-600">ADMIN role required for tamper tests, restores and block mining.</p>}
+        {!isAdmin && <p className="mt-3 text-[11px] text-slate-600">ADMIN role required for tamper tests, restores and block mining. Analysts can attach files to evidence records.</p>}
       </Card>
 
       {error && (

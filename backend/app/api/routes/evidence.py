@@ -1,14 +1,18 @@
 """Evidence ledger + blockchain API routes."""
+import hashlib
 import logging
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_roles
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.forensics import EvidenceRecord, LedgerBlock
 from app.models.user import User
@@ -47,6 +51,10 @@ def _record_out(r: EvidenceRecord) -> dict:
         "verified_at": r.verified_at.isoformat() if r.verified_at else None,
         "created_at": r.created_at.isoformat(),
         "meta": r.meta or {},
+        "attachment": {
+            "name": r.attachment_name,
+            "hash": r.attachment_hash,
+        } if r.attachment_name else None,
     }
 
 
@@ -173,6 +181,55 @@ def create_evidence(
         created_by=user.email,
     )
     return _record_out(record)
+
+
+@router.post("/{evidence_id}/attachment", status_code=200)
+async def upload_attachment(
+    evidence_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("ADMIN", "SECURITY_ANALYST")),
+):
+    """Attach a file to an evidence record. Its SHA-256 is stored with the
+    record so the attachment can be verified independently of the hash chain."""
+    record = db.scalar(select(EvidenceRecord).where(EvidenceRecord.evidence_id == evidence_id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Evidence record not found")
+    data = await file.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Attachment exceeds 25 MB limit")
+    digest = hashlib.sha256(data).hexdigest()
+    base = Path(get_settings().dataset_upload_dir) / "evidence"
+    base.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename or "attachment.bin").name
+    path = base / f"{record.evidence_id}_{safe_name}"
+    path.write_bytes(data)
+    record.attachment_name = safe_name
+    record.attachment_path = str(path)
+    record.attachment_hash = digest
+    db.commit()
+    log_action(db, actor=user.email, action="EVIDENCE.ATTACHMENT_ADDED",
+               target_type="evidence", target_id=evidence_id,
+               detail={"name": safe_name, "sha256": digest},
+               ip_address=None)
+    return _record_out(record)
+
+
+@router.get("/{evidence_id}/attachment")
+def download_attachment(
+    evidence_id: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Download an evidence record's attachment."""
+    record = db.scalar(select(EvidenceRecord).where(EvidenceRecord.evidence_id == evidence_id))
+    if record is None or not record.attachment_path:
+        raise HTTPException(status_code=404, detail="No attachment on this record")
+    path = Path(record.attachment_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Attachment file is missing from storage")
+    return FileResponse(path, filename=record.attachment_name or "attachment.bin",
+                        media_type="application/octet-stream")
 
 
 @router.post("/{evidence_id}/verify")

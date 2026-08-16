@@ -409,3 +409,107 @@ def test_sso_block_toggle(client, admin_headers, db_session):
     finally:
         db_session.execute(delete(User).where(User.id == user.id))
         db_session.commit()
+
+
+def _fresh_session_user(client, db_session, email="sess.test@cybersentinel.io"):
+    """Create a password user and log in, returning (user, access, refresh)."""
+    from app.core.security import hash_password
+    user = _create_user(db_session, email, hash_password("Sess@2026"))
+    r = client.post("/api/auth/login", json={"email": email, "password": "Sess@2026"})
+    assert r.status_code == 200, r.text
+    return user, r.json()["tokens"]["access_token"], r.json()["tokens"]["refresh_token"]
+
+
+def test_login_records_session_and_self_revoke_blocks_refresh(client, admin_headers, db_session):
+    user, tok, refresh = _fresh_session_user(client, db_session)
+    headers = {"Authorization": f"Bearer {tok}"}
+    try:
+        # Login recorded a session; the calling session is marked current
+        r = client.get("/api/auth/sessions", headers=headers)
+        assert r.status_code == 200, r.text
+        sessions = r.json()
+        assert len(sessions) == 1
+        assert sessions[0]["current"] is True
+        assert sessions[0]["revoked"] is False
+        assert sessions[0]["device_id"]
+
+        # Revoke the session ourselves
+        r = client.post(f"/api/auth/sessions/{sessions[0]['device_id']}/revoke", headers=headers)
+        assert r.status_code == 200 and r.json()["revoked"] is True
+        # The matching refresh token is now dead
+        assert client.post("/api/auth/refresh", json={"refresh_token": refresh}).status_code == 401
+        # Admin sees the revoked session
+        r = client.get(f"/api/auth/users/{user.id}/sessions", headers=admin_headers)
+        assert r.status_code == 200
+        assert len(r.json()) == 1 and r.json()[0]["revoked"] is True
+    finally:
+        db_session.execute(delete(User).where(User.id == user.id))
+        db_session.commit()
+
+
+def test_admin_revokes_any_session(client, admin_headers, db_session):
+    user, tok, refresh = _fresh_session_user(client, db_session, email="sess2.test@cybersentinel.io")
+    try:
+        r = client.get(f"/api/auth/users/{user.id}/sessions", headers=admin_headers)
+        device_id = r.json()[0]["device_id"]
+        r = client.post(f"/api/auth/users/{user.id}/sessions/{device_id}/revoke", headers=admin_headers)
+        assert r.status_code == 200 and r.json()["revoked"] is True
+        assert client.post("/api/auth/refresh", json={"refresh_token": refresh}).status_code == 401
+        # access token still valid until TTL (session-level revocation is via refresh)
+        assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {tok}"}).status_code == 200
+        # unknown session -> 404
+        assert client.post(f"/api/auth/users/{user.id}/sessions/nope/revoke",
+                           headers=admin_headers).status_code == 404
+    finally:
+        db_session.execute(delete(User).where(User.id == user.id))
+        db_session.commit()
+
+
+def test_evidence_attachment_upload_download_and_export(client, analyst_headers, db_session):
+    """Attach a file to an evidence record; download it; it ships in the export."""
+    import io as _io
+    import zipfile
+    from pathlib import Path as _Path
+    from app.models.forensics import EvidenceRecord
+
+    r = client.post("/api/evidence", headers=analyst_headers, json={
+        "evidence_type": "MANUAL", "title": "Attachment test evidence",
+        "description": "for attachment flow", "data_source": "LOCAL",
+    })
+    assert r.status_code == 201, r.text
+    evidence_id = r.json()["evidence_id"]
+    try:
+        content = b"cybersentinel-evidence-attachment"
+        r = client.post(
+            f"/api/evidence/{evidence_id}/attachment",
+            headers=analyst_headers,
+            files={"file": ("artifact.txt", content, "text/plain")},
+        )
+        assert r.status_code == 200, r.text
+        att = r.json()["attachment"]
+        assert att["name"] == "artifact.txt"
+        assert att["hash"] == __import__("hashlib").sha256(content).hexdigest()
+
+        r = client.get(f"/api/evidence/{evidence_id}/attachment", headers=analyst_headers)
+        assert r.status_code == 200
+        assert r.content == content
+
+        # The analyst's export bundle ships the attachment under evidence/<id>/name
+        r = client.get("/api/auth/me/export?fmt=zip", headers=analyst_headers)
+        assert r.status_code == 200
+        with zipfile.ZipFile(_io.BytesIO(r.content)) as zf:
+            names = set(zf.namelist())
+            assert f"evidence/{evidence_id}/artifact.txt" in names
+            assert zf.read(f"evidence/{evidence_id}/artifact.txt") == content
+
+        rec = db_session.scalar(select(EvidenceRecord).where(EvidenceRecord.evidence_id == evidence_id))
+        if rec and rec.attachment_path and _Path(rec.attachment_path).exists():
+            _Path(rec.attachment_path).unlink()
+    finally:
+        db_session.execute(delete(EvidenceRecord).where(EvidenceRecord.evidence_id == evidence_id))
+        db_session.commit()
+
+
+def test_evidence_attachment_missing_file_404(client, analyst_headers):
+    r = client.get("/api/evidence/nonexistent/attachment", headers=analyst_headers)
+    assert r.status_code == 404

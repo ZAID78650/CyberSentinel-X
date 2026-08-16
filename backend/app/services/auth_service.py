@@ -13,7 +13,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models.user import Role, User
+from app.models.user import Device, Role, User
 from app.schemas.auth import LoginRequest, RegisterRequest
 from app.services.audit import log_action
 
@@ -91,16 +91,45 @@ def authenticate(db: Session, req: LoginRequest, ip: Optional[str] = None, reque
 
 def build_tokens(user: User, remember_me: bool = False):
     # `ver` binds every token to the user's current token_version, so
-    # deprovisioning (which bumps it) revokes all outstanding sessions.
-    access = create_access_token(str(user.id), extra={
-        "roles": user.role_names, "email": user.email, "ver": user.token_version})
+    # deprovisioning (which bumps it) revokes all outstanding sessions. The
+    # access token also carries `sess` (the refresh token's jti) so the API
+    # can mark the current session in the session list.
     refresh = create_refresh_token(str(user.id), extra={"ver": user.token_version})
+    jti = (decode_token(refresh, refresh=True) or {}).get("jti")
+    access = create_access_token(str(user.id), extra={
+        "roles": user.role_names, "email": user.email, "ver": user.token_version, "sess": jti})
     return {
         "access_token": access,
         "refresh_token": refresh,
         "token_type": "bearer",
         "expires_in": 30 * 60 if not remember_me else 7 * 24 * 60 * 60,
     }
+
+
+def record_session(
+    db: Session,
+    user: User,
+    refresh_token: str,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Optional[Device]:
+    """Persist a login as a device/session row keyed by the refresh token jti."""
+    jti = (decode_token(refresh_token, refresh=True) or {}).get("jti")
+    if not jti:
+        return None
+    now = datetime.now(timezone.utc)
+    dev = db.scalar(select(Device).where(Device.user_id == user.id, Device.device_id == jti))
+    if dev is None:
+        dev = Device(device_id=jti, user_id=user.id,
+                     device_name=(user_agent or "Unknown device")[:255],
+                     ip_address=ip, first_seen=now, last_seen=now)
+        db.add(dev)
+    else:
+        dev.last_seen = now
+        if ip:
+            dev.ip_address = ip
+    db.commit()
+    return dev
 
 
 def refresh_access_token(db: Session, refresh_token: str, ip: Optional[str] = None) -> dict:
@@ -114,6 +143,14 @@ def refresh_access_token(db: Session, refresh_token: str, ip: Optional[str] = No
     # A bumped token_version (deprovisioning) revokes this refresh token too.
     if payload.get("ver", 0) != user.token_version:
         raise AuthError("Session revoked. Sign in again.", 401)
+    # Per-session revocation: a revoked/missing session row kills this refresh.
+    jti = payload.get("jti")
+    if jti:
+        dev = db.scalar(select(Device).where(Device.device_id == jti))
+        if dev is None or dev.revoked_at is not None:
+            raise AuthError("Session revoked. Sign in again.", 401)
+        dev.last_seen = datetime.now(timezone.utc)
+        db.commit()
     log_action(db, actor=user.email, action="AUTH.TOKEN_REFRESH", target_type="user", target_id=str(user.id),
                ip_address=ip)
     return build_tokens(user)

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { Archive, Download, FileText, Github, KeyRound, Loader2, ShieldCheck, Unlink, User } from "lucide-react";
+import { Archive, Download, FileText, Github, KeyRound, Laptop, Loader2, ShieldCheck, Unlink, User } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { Card, StatusBadge } from "../components/ui";
-import { exportMyData, getErrorMessage, oauthLink, oauthProviders, oauthUnlink, setPassword } from "../services/api";
-import type { OAuthProviderStatus } from "../types";
+import {
+  exportMyData, getErrorMessage, mySessions, oauthLink, oauthProviders, oauthUnlink,
+  revokeMySession, setPassword,
+} from "../services/api";
+import type { OAuthProviderStatus, SessionItem } from "../types";
 
 export default function Settings() {
   const { user, refreshUser } = useAuth();
@@ -15,6 +18,31 @@ export default function Settings() {
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwd, setPwd] = useState({ current_password: "", new_password: "", confirm_password: "" });
   const [exporting, setExporting] = useState<"json" | "csv" | "zip" | null>(null);
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [sessBusy, setSessBusy] = useState<string | null>(null);
+
+  const loadSessions = () => {
+    mySessions().then(setSessions).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    loadSessions();
+  }, []);
+
+  const handleRevokeSession = async (deviceId: string) => {
+    if (!window.confirm("Revoke this session? The device will be signed out on its next token refresh.")) return;
+    setSessBusy(deviceId);
+    try {
+      await revokeMySession(deviceId);
+      await refreshUser();
+      loadSessions();
+      success("Session revoked", "That device can no longer refresh its session.");
+    } catch (err) {
+      error("Revoke failed", getErrorMessage(err));
+    } finally {
+      setSessBusy(null);
+    }
+  };
 
   const handleExport = async (format: "json" | "csv" | "zip") => {
     setExporting(format);
@@ -262,6 +290,44 @@ export default function Settings() {
         </div>
         <p className="mt-3 text-xs text-slate-600">
           Every export is recorded in the audit log (AUTH.DATA_EXPORT).
+        </p>
+      </Card>
+
+      <Card title="Active sessions" subtitle="Devices signed in to your account — revoke any you don't recognize">
+        {sessions.length === 0 ? (
+          <p className="text-sm text-slate-500">No sessions recorded yet — sign-ins are tracked automatically.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {sessions.map((s) => (
+              <div key={s.device_id} className="flex items-center gap-3 rounded-lg bg-night-850/60 px-4 py-2.5">
+                <span className="text-electric-400"><Laptop className="h-4 w-4" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-slate-300">
+                    {s.device_name ?? "Unknown device"}
+                    {s.current && <span className="ml-2 text-[10px] font-bold text-cyber-green">THIS DEVICE</span>}
+                    {s.revoked && <span className="ml-2 text-[10px] font-bold text-cyber-red">REVOKED</span>}
+                  </p>
+                  <p className="truncate text-xs text-slate-600">
+                    {s.ip_address ?? "unknown IP"} · first {s.first_seen ? new Date(s.first_seen).toLocaleString() : "—"}
+                    {" · "}last {s.last_seen ? new Date(s.last_seen).toLocaleString() : "—"}
+                  </p>
+                </div>
+                {!s.revoked && (
+                  <button
+                    onClick={() => handleRevokeSession(s.device_id)}
+                    disabled={sessBusy === s.device_id}
+                    className="flex items-center gap-1 rounded-md border border-cyber-red/40 px-2.5 py-1 text-xs font-medium text-cyber-red transition hover:bg-cyber-red/10 disabled:opacity-50"
+                  >
+                    {sessBusy === s.device_id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Revoke
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="mt-3 text-xs text-slate-600">
+          Revoking a session signs the device out on its next token refresh (access tokens expire within 30 minutes).
         </p>
       </Card>
 

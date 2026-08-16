@@ -29,7 +29,7 @@ from app.schemas.auth import (
     UserSsoBlockUpdate,
     UserStatusUpdate,
 )
-from app.services.auth_service import AuthError, authenticate, build_tokens, refresh_access_token, register
+from app.services.auth_service import AuthError, authenticate, build_tokens, record_session, refresh_access_token, register
 
 KNOWN_ROLES = ("ADMIN", "SECURITY_ANALYST", "VIEWER")
 
@@ -73,6 +73,8 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     from app.core.firewall import brute_guard_clear
     brute_guard_clear(account_key)
     tokens = build_tokens(user, remember_me=req.remember_me)
+    record_session(db, user, tokens["refresh_token"], ip=get_client_ip(request),
+                   user_agent=request.headers.get("user-agent"))
     return AuthResponse(user=UserOut.model_validate(user), tokens=TokenResponse(**tokens))
 
 
@@ -145,6 +147,99 @@ def list_users(db: Session = Depends(get_db), _: User = Depends(require_roles("A
 
 def _iso(v) -> Optional[str]:
     return v.isoformat() if v else None
+
+
+def _session_out(dev: Device, current_jti: Optional[str] = None) -> dict:
+    return {
+        "device_id": dev.device_id,
+        "device_name": dev.device_name,
+        "os": dev.os,
+        "browser": dev.browser,
+        "ip_address": dev.ip_address,
+        "location": dev.location,
+        "is_trusted": dev.is_trusted,
+        "first_seen": _iso(dev.first_seen),
+        "last_seen": _iso(dev.last_seen),
+        "revoked": dev.revoked_at is not None,
+        "current": dev.device_id == current_jti,
+    }
+
+
+def _current_session_jti(request: Request) -> Optional[str]:
+    """The `sess` claim of the caller's access token (marks the live session)."""
+    from app.core.security import decode_token
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        payload = decode_token(auth[7:])
+        if payload:
+            return payload.get("sess")
+    return None
+
+
+@router.get("/sessions")
+def my_sessions(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """List the signed-in account's sessions (devices), newest first."""
+    devices = db.scalars(
+        select(Device).where(Device.user_id == user.id).order_by(Device.last_seen.desc())
+    ).all()
+    current = _current_session_jti(request)
+    return [_session_out(d, current) for d in devices]
+
+
+@router.post("/sessions/{device_id}/revoke")
+def revoke_my_session(
+    device_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Revoke one of the signed-in account's sessions. That refresh token dies
+    immediately; the matching access token expires within its TTL."""
+    from app.services.audit import log_action
+    dev = db.scalar(select(Device).where(Device.user_id == user.id, Device.device_id == device_id))
+    if dev is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    dev.revoked_at = datetime.now(timezone.utc)
+    db.commit()
+    log_action(db, actor=user.email, action="AUTH.SESSION_REVOKED", target_type="device",
+               target_id=device_id, ip_address=get_client_ip(request))
+    return _session_out(dev, _current_session_jti(request))
+
+
+@router.get("/users/{user_id}/sessions")
+def admin_user_sessions(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: list every session of an account."""
+    user = _get_user_or_404(db, user_id)
+    devices = db.scalars(
+        select(Device).where(Device.user_id == user.id).order_by(Device.last_seen.desc())
+    ).all()
+    return [_session_out(d) for d in devices]
+
+
+@router.post("/users/{user_id}/sessions/{device_id}/revoke")
+def admin_revoke_session(
+    user_id: uuid.UUID,
+    device_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: revoke a specific session of any account."""
+    from app.services.audit import log_action
+    user = _get_user_or_404(db, user_id)
+    dev = db.scalar(select(Device).where(Device.user_id == user.id, Device.device_id == device_id))
+    if dev is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    dev.revoked_at = datetime.now(timezone.utc)
+    db.commit()
+    log_action(db, actor=admin.email, action="AUTH.USER_SESSION_REVOKED", target_type="device",
+               target_id=device_id, detail={"user": user.email},
+               ip_address=get_client_ip(request))
+    return _session_out(dev)
 
 
 @router.get("/me/export")
@@ -230,6 +325,7 @@ def export_my_data(
                 "evidence_id": e.evidence_id, "evidence_type": e.evidence_type, "title": e.title,
                 "description": e.description, "chain_index": e.chain_index, "status": e.status,
                 "data_source": e.data_source, "record_hash": e.record_hash, "created_by": e.created_by,
+                "attachment_name": e.attachment_name, "attachment_path": e.attachment_path,
                 "created_at": _iso(e.created_at),
             }
             for e in db.scalars(select(EvidenceRecord)
@@ -264,6 +360,14 @@ table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ddd;padding
             zf.writestr("audit.csv", csv_buf.getvalue())
             zf.writestr("evidence.json", json.dumps(evidence, indent=2, default=str))
             zf.writestr("summary.html", summary)
+            # Evidence attachments (files stored on disk) travel in the bundle
+            for e in evidence:
+                if not e.get("attachment_name"):
+                    continue
+                from pathlib import Path as _Path
+                p = _Path(e.get("attachment_path")) if e.get("attachment_path") else None
+                if p and p.exists():
+                    zf.writestr(f"evidence/{e['evidence_id']}/{e['attachment_name']}", p.read_bytes())
         return Response(
             content=zf_buf.getvalue(),
             media_type="application/zip",

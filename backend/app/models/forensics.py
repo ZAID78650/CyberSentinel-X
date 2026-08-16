@@ -59,6 +59,11 @@ class EvidenceRecord(Base, UUIDMixin, TimestampMixin):
     created_by: Mapped[str] = mapped_column(String(128), default="evidence-agent", nullable=False)
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     meta: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # Optional attachment (supplementary file). Its SHA-256 is stored with the
+    # record; the chain hashes remain untouched by the attachment.
+    attachment_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    attachment_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    attachment_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
 class LedgerBlock(Base, UUIDMixin, TimestampMixin):

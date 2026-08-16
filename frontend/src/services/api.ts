@@ -1,6 +1,6 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { API_BASE } from "../config";
-import type { AuthResponse, Tokens, User } from "../types";
+import type { AuthResponse, SessionItem, Tokens, User } from "../types";
 
 const TOKEN_KEY = "csx_access";
 const REFRESH_KEY = "csx_refresh";
@@ -188,6 +188,52 @@ export async function restoreUser(userId: string): Promise<User> {
 
 export async function setUserSsoBlock(userId: string, blocked: boolean): Promise<User> {
   const res = await api.post<User>(`/auth/users/${userId}/sso-block`, { blocked });
+  return res.data;
+}
+
+export async function mySessions(): Promise<SessionItem[]> {
+  const res = await api.get<SessionItem[]>("/auth/sessions");
+  return res.data;
+}
+
+export async function revokeMySession(deviceId: string): Promise<SessionItem> {
+  const res = await api.post<SessionItem>(`/auth/sessions/${deviceId}/revoke`);
+  return res.data;
+}
+
+export async function userSessions(userId: string): Promise<SessionItem[]> {
+  const res = await api.get<SessionItem[]>(`/auth/users/${userId}/sessions`);
+  return res.data;
+}
+
+export async function adminRevokeSession(userId: string, deviceId: string): Promise<SessionItem> {
+  const res = await api.post<SessionItem>(`/auth/users/${userId}/sessions/${deviceId}/revoke`);
+  return res.data;
+}
+
+async function downloadBlob(url: string, fallbackName: string): Promise<void> {
+  const res = await api.get(url, { responseType: "blob" });
+  const disposition = String(res.headers["content-disposition"] ?? "");
+  const match = disposition.match(/filename="?([^";]+)"?/);
+  const filename = match?.[1] ?? fallbackName;
+  const blobUrl = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
+export async function downloadEvidenceAttachment(evidenceId: string): Promise<void> {
+  await downloadBlob(`/evidence/${evidenceId}/attachment`, "attachment.bin");
+}
+
+export async function uploadEvidenceAttachment(evidenceId: string, file: File): Promise<unknown> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await api.post(`/evidence/${evidenceId}/attachment`, form);
   return res.data;
 }
 

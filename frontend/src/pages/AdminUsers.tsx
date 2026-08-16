@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Archive, Check, Chrome, Github, KeyRound, Loader2, Lock, Pencil, Power,
+  Archive, Check, Chrome, Github, KeyRound, Laptop, Loader2, Lock, Pencil, Power,
   RotateCcw, ShieldAlert, ShieldCheck, ShieldOff, UserCheck, Users, X,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { Card, StatusBadge } from "../components/ui";
 import {
-  adminResetPassword, deprovisionUser, getErrorMessage, listUsers, restoreUser,
-  setUserSsoBlock, setUserStatus, updateUserRoles,
+  adminResetPassword, adminRevokeSession, deprovisionUser, getErrorMessage, listUsers,
+  restoreUser, setUserSsoBlock, setUserStatus, updateUserRoles, userSessions,
 } from "../services/api";
-import type { User } from "../types";
+import type { SessionItem, User } from "../types";
 
 type SignInKind = "password" | "google" | "github" | "sso-only";
 
@@ -51,6 +51,8 @@ export default function AdminUsers() {
   const [editPwd, setEditPwd] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [savingRoles, setSavingRoles] = useState(false);
+  const [sessionsByUser, setSessionsByUser] = useState<Record<string, SessionItem[]>>({});
+  const [sessBusy, setSessBusy] = useState<string | null>(null);
 
   const isAdmin = user?.roles.includes("ADMIN") ?? false;
   const meId = user?.id;
@@ -126,6 +128,28 @@ export default function AdminUsers() {
     setBusyId(u.id);
     await apply(setUserSsoBlock(u.id, blocked), `${u.email} SSO ${blocked ? "blocked" : "enabled"}.`);
     setBusyId(null);
+  };
+
+  const handleStartEdit = async (u: User) => {
+    setEditingId(u.id);
+    setEditRoles(u.roles);
+    setEditPwd("");
+    userSessions(u.id).then((s) => setSessionsByUser((m) => ({ ...m, [u.id]: s }))).catch(() => undefined);
+  };
+
+  const handleAdminRevokeSession = async (u: User, deviceId: string) => {
+    if (!window.confirm(`Revoke this session for ${u.email}?`)) return;
+    setSessBusy(deviceId);
+    try {
+      await adminRevokeSession(u.id, deviceId);
+      const updated = await userSessions(u.id);
+      setSessionsByUser((m) => ({ ...m, [u.id]: updated }));
+      success("Session revoked", `${u.email}'s session is revoked.`);
+    } catch (err) {
+      error("Revoke failed", getErrorMessage(err));
+    } finally {
+      setSessBusy(null);
+    }
   };
 
   const toggleRole = (role: string) =>
@@ -212,8 +236,11 @@ export default function AdminUsers() {
                     editPwd={editPwd}
                     busyId={busyId}
                     savingRoles={savingRoles}
+                    sessions={sessionsByUser[u.id] ?? []}
+                    sessBusy={sessBusy}
                     onToggleActive={() => handleToggleActive(u)}
-                    onStartEdit={() => { setEditingId(u.id); setEditRoles(u.roles); setEditPwd(""); }}
+                    onStartEdit={() => handleStartEdit(u)}
+                    onAdminRevokeSession={(deviceId: string) => handleAdminRevokeSession(u, deviceId)}
                     onCancelEdit={() => setEditingId(null)}
                     onToggleRole={toggleRole}
                     onPwdChange={setEditPwd}
@@ -251,10 +278,13 @@ interface RowProps {
   onDeprovision: () => void;
   onRestore: () => void;
   onBlockSso: (blocked: boolean) => void;
+  sessions: SessionItem[];
+  sessBusy: string | null;
+  onAdminRevokeSession: (deviceId: string) => void;
 }
 
 function Row(props: RowProps) {
-  const { u, meId, editing, editRoles, editPwd, busyId, savingRoles } = props;
+  const { u, meId, editing, editRoles, editPwd, busyId, savingRoles, sessions, sessBusy } = props;
   const busy = busyId === u.id;
   const isSelf = u.id === meId;
 
@@ -374,6 +404,38 @@ function Row(props: RowProps) {
                   <X className="h-3 w-3" />
                   Cancel
                 </button>
+              </div>
+              <div className="min-w-[260px]">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">Sessions ({sessions.length})</p>
+                {sessions.length === 0 ? (
+                  <p className="text-[11px] text-slate-600">No sessions recorded.</p>
+                ) : (
+                  <div className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
+                    {sessions.map((s) => (
+                      <div key={s.device_id} className="flex items-center gap-2 rounded-md bg-night-900/60 px-2.5 py-1.5">
+                        <Laptop className="h-3 w-3 shrink-0 text-slate-500" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[11px] text-slate-300">
+                            {s.device_name ?? "Unknown device"}
+                            {s.revoked && <span className="ml-1 text-[9px] font-bold text-cyber-red">REVOKED</span>}
+                          </p>
+                          <p className="truncate text-[10px] text-slate-600">
+                            {s.ip_address ?? "unknown IP"} · {s.last_seen ? new Date(s.last_seen).toLocaleString() : "—"}
+                          </p>
+                        </div>
+                        {!s.revoked && (
+                          <button
+                            onClick={() => props.onAdminRevokeSession(s.device_id)}
+                            disabled={sessBusy === s.device_id}
+                            className="rounded border border-cyber-red/40 px-1.5 py-0.5 text-[9px] font-semibold text-cyber-red transition hover:bg-cyber-red/10 disabled:opacity-50"
+                          >
+                            {sessBusy === s.device_id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : "Revoke"}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="min-w-[220px]">
                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600">Account lifecycle</p>

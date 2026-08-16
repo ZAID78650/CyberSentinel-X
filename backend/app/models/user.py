@@ -82,5 +82,8 @@ class Device(Base, UUIDMixin, TimestampMixin):
     is_trusted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # Session lifecycle: set when the session's refresh token is revoked
+    # (per-session revocation without invalidating the whole account).
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="devices")

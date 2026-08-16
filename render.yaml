@@ -77,6 +77,24 @@ services:
         value: https://cybersentinel-frontend.onrender.com
       - key: FRONTEND_URL
         value: https://cybersentinel-frontend.onrender.com
+      - key: BACKEND_URL
+        # Public backend origin — the OAuth redirect_uri is built from this.
+        # Without it, SSO would redirect the browser to localhost:8000.
+        value: https://cybersentinel-backend-t5pv.onrender.com
+      # Google / GitHub OAuth (SSO). Create an OAuth app per provider and set
+      # the values in the Render dashboard (sync: false = not overwritten by
+      # this blueprint). Register these exact redirect URIs with the provider:
+      #   Google:  https://cybersentinel-backend-t5pv.onrender.com/api/auth/oauth/google/callback
+      #   GitHub:  https://cybersentinel-backend-t5pv.onrender.com/api/auth/oauth/github/callback
+      # See docs/OAUTH_SETUP.md for the full walkthrough.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
       - key: UNSW_DATASET_DIR
         value: ""
       - key: UNSW_INGEST_LIMIT

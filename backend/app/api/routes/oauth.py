@@ -12,7 +12,7 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -76,19 +76,33 @@ def list_providers():
     return {"providers": out}
 
 
+def _redirect_uri(provider: str) -> str:
+    return get_settings().backend_url.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
+
+
 @router.get("/{provider}/authorize")
-def authorize(provider: str, request: Request):
+def authorize(provider: str, response: Response):
     cfg = _provider_config(provider)
     client_id, _secret = _client_ids(provider)
     if not client_id:
         return {"provider": provider, "configured": False,
                 "message": f"{provider.capitalize()} SSO is not configured. Add {cfg['client_id_env']} to your environment."}
 
-    state = secrets.token_urlsafe(16)
-    request.state.oauth_state = state  # opaque; validated on callback via the query param
+    # CSRF protection: the state token is issued as an HttpOnly cookie and
+    # must be echoed back by the provider on the callback. Validated there.
+    state = secrets.token_urlsafe(24)
+    response.set_cookie(
+        key="csx_oauth_state",
+        value=state,
+        max_age=600,
+        httponly=True,
+        samesite="lax",
+        secure=(get_settings().environment == "production"),
+        path="/api/auth/oauth",
+    )
     params = {
         "client_id": client_id,
-        "redirect_uri": get_settings().backend_url.rstrip("/") + f"/api/auth/oauth/{provider}/callback",
+        "redirect_uri": _redirect_uri(provider),
         "response_type": "code",
         "scope": cfg["scope"],
         "state": state,
@@ -115,7 +129,12 @@ async def callback(
     if not client_id or not client_secret:
         raise HTTPException(status_code=503, detail=f"{provider.capitalize()} SSO is not configured on the server.")
 
-    redirect_uri = get_settings().backend_url.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
+    # CSRF: the state must match the one we issued in the authorize cookie.
+    expected_state = request.cookies.get("csx_oauth_state") if request else None
+    if not expected_state or not secrets.compare_digest(state, expected_state):
+        raise HTTPException(status_code=400, detail="OAuth state mismatch. Please try again.")
+
+    redirect_uri = _redirect_uri(provider)
 
     # 1) Exchange the authorization code for tokens
     try:
@@ -154,7 +173,24 @@ async def callback(
         logger.error("oauth userinfo error: %s", exc)
         raise HTTPException(status_code=502, detail="OAuth provider unreachable")
 
+    # Google: only accept verified accounts; GitHub: profile.email may be null
+    # when the user keeps their email private — fetch /user/emails in that case.
     email = (profile.get("email") or "").lower()
+    if provider == "google" and profile.get("email_verified") is False:
+        raise HTTPException(status_code=400, detail="Google account email is not verified.")
+    if provider == "github" and not email:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                emails_res = await client.get(
+                    "https://api.github.com/user/emails",
+                    headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+                )
+                emails = emails_res.json()
+            verified = [e for e in emails if isinstance(e, dict) and e.get("verified")]
+            primary = next((e for e in verified if e.get("primary")), None) or (verified[0] if verified else None)
+            email = ((primary or {}).get("email") or "").lower()
+        except httpx.HTTPError as exc:
+            logger.error("oauth github emails error: %s", exc)
     if not email:
         raise HTTPException(status_code=400, detail=f"{provider.capitalize()} did not return an email address.")
 
@@ -191,8 +227,9 @@ async def callback(
                ip_address=get_client_ip(request) if request else None)
 
     tokens = build_tokens(user, remember_me=True)
-    # Redirect the browser back to the SPA with credentials in the fragment
+    # Redirect back to the SPA with credentials in the URL fragment (never the
+    # query string, so tokens don't land in server/referrer logs).
     fe = get_settings().frontend_url.rstrip("/")
     return __import__("fastapi").responses.RedirectResponse(
-        f"{fe}/oauth/callback?access={tokens['access_token']}&refresh={tokens['refresh_token']}"
+        f"{fe}/oauth/callback#access={tokens['access_token']}&refresh={tokens['refresh_token']}"
     )

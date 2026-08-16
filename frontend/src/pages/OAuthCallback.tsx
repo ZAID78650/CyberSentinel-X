@@ -1,23 +1,33 @@
-import { useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { completeOAuth } from "../services/api";
 
+function readParams(): { access: string | null; refresh: string | null } {
+  // Tokens arrive in the URL fragment (#access=...&refresh=...) so they never
+  // hit server/referrer logs. Fall back to the query string for older links.
+  const raw = window.location.hash.replace(/^#/, "") || window.location.search.replace(/^\?/, "");
+  const params = new URLSearchParams(raw);
+  return { access: params.get("access"), refresh: params.get("refresh") };
+}
+
 export default function OAuthCallback() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const done = useRef(false);
 
   useEffect(() => {
-    const access = params.get("access");
-    const refresh = params.get("refresh");
+    if (done.current) return;
+    const { access, refresh } = readParams();
     if (access && refresh) {
+      done.current = true;
       completeOAuth(access, refresh);
-      window.dispatchEvent(new CustomEvent("auth:oauth"));
+      // Strip the credentials from the URL now that they are stored.
+      window.history.replaceState({}, document.title, "/oauth/callback");
       navigate("/dashboard", { replace: true });
     } else {
       navigate("/login", { replace: true });
     }
-  }, [params, navigate]);
+  }, [navigate]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-night-950">

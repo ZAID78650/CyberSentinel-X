@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -187,12 +187,24 @@ def threat_space(
     """Stratified 3D point cloud of network flows (bytes in/out vs rate)."""
 
     def build():
+        # Column projection only — never materialize full ORM entities for a
+        # 6k-row sample; keeps peak memory flat on the free tier.
         sample = db.execute(
-            select(SecurityEvent).order_by(func.random()).limit(min(limit * 3, 6000))
-        ).scalars().all()
+            select(
+                SecurityEvent.metadata_,
+                SecurityEvent.event_type,
+                SecurityEvent.severity,
+                SecurityEvent.is_anomalous,
+                SecurityEvent.anomaly_score,
+                SecurityEvent.source_ip,
+                SecurityEvent.timestamp,
+            )
+            .order_by(func.random())
+            .limit(min(limit * 3, 6000))
+        ).all()
         points = []
-        for e in sample:
-            meta = e.metadata_ or {}
+        for meta, event_type, severity, is_anomalous, anomaly_score, source_ip, ts in sample:
+            meta = meta or {}
             if meta.get("dataset") != "unsw-nb15":
                 continue
             points.append({
@@ -201,13 +213,13 @@ def threat_space(
                 "z": _log10(meta.get("rate", 0)),
                 "spkts": int(meta.get("spkts") or 0),
                 "dpkts": int(meta.get("dpkts") or 0),
-                "category": meta.get("attack_cat") or e.event_type,
-                "severity": e.severity,
-                "is_anomalous": e.is_anomalous,
-                "anomaly_score": e.anomaly_score,
-                "event_type": e.event_type,
-                "source_ip": e.source_ip,
-                "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                "category": meta.get("attack_cat") or event_type,
+                "severity": severity,
+                "is_anomalous": is_anomalous,
+                "anomaly_score": anomaly_score,
+                "event_type": event_type,
+                "source_ip": source_ip,
+                "timestamp": ts.isoformat() if ts else None,
             })
             if len(points) >= limit:
                 break
@@ -221,24 +233,35 @@ def attack_distribution(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """3D-bar data: attack family x hour-of-day counts (24h rhythm)."""
+    """3D-bar data: attack family x hour-of-day counts (24h rhythm).
+
+    Aggregated entirely in SQL (GROUP BY on the JSON attack category + hour)
+    so a 175K-row UNSW corpus never materializes in Python memory — the
+    old Python-side loop OOM'd the free-tier instance.
+    """
 
     def build():
+        dialect = db.get_bind().dialect.name
+        if dialect == "sqlite":
+            # SQLite lacks Postgres' ->/->> operators; use the JSON1 function.
+            cat_raw = func.json_extract(SecurityEvent.metadata_, "$.attack_cat")
+        else:
+            cat_raw = SecurityEvent.metadata_["attack_cat"].astext
+        cat_expr = func.coalesce(func.nullif(cat_raw, ""), "Normal")
         rows = db.execute(
-            select(SecurityEvent.metadata_, SecurityEvent.timestamp)
+            select(
+                cat_expr.label("category"),
+                func.coalesce(func.extract("hour", SecurityEvent.timestamp), 0).label("hour"),
+                func.count().label("count"),
+            )
             .where(SecurityEvent.is_anomalous.is_(True))
+            .group_by("category", "hour")
         ).all()
-        agg: dict = {}
-        for meta, ts in rows:
-            cat = (meta or {}).get("attack_cat") or "Normal"
-            hour = ts.hour if ts else 0
-            key = (cat, hour)
-            agg[key] = agg.get(key, 0) + 1
         out = [
-            {"category": cat, "hour": hour, "count": count}
-            for (cat, hour), count in sorted(agg.items())
+            {"category": r.category, "hour": int(r.hour), "count": r.count}
+            for r in rows
         ]
-        return out
+        return sorted(out, key=lambda d: (d["category"], d["hour"]))
 
     return _cached("attack_distribution", 60.0, build)
 
@@ -249,23 +272,38 @@ def events_timeseries(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Hourly event volume (total + anomalous) for the live flow charts."""
+    """Hourly event volume (total + anomalous) for the live flow charts.
+
+    Aggregated in SQL (date_trunc on Postgres, strftime on SQLite) so 48h of
+    UNSW flows never materialize in Python memory. Bucket keys are emitted as
+    UTC ISO strings with `.000Z` so the frontend's hourKey() equality check
+    (used for live WebSocket bumps) matches exactly.
+    """
 
     def build():
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        dialect = db.get_bind().dialect.name
+        if dialect == "sqlite":
+            bucket_expr = func.strftime("%Y-%m-%dT%H:00:00.000Z", SecurityEvent.timestamp)
+        else:
+            bucket_expr = func.date_trunc("hour", SecurityEvent.timestamp)
         rows = db.execute(
-            select(SecurityEvent.timestamp, SecurityEvent.is_anomalous)
+            select(
+                bucket_expr.label("bucket"),
+                func.count().label("total"),
+                func.sum(case((SecurityEvent.is_anomalous.is_(True), 1), else_=0)).label("anomalous"),
+            )
             .where(SecurityEvent.timestamp >= cutoff)
+            .group_by("bucket")
+            .order_by("bucket")
         ).all()
-        buckets: dict = {}
-        for ts, anom in rows:
-            key = ts.replace(minute=0, second=0, microsecond=0) if ts else None
-            if key is None:
-                continue
-            b = buckets.setdefault(key, {"time": key.isoformat(), "total": 0, "anomalous": 0})
-            b["total"] += 1
-            if anom:
-                b["anomalous"] += 1
-        return sorted(buckets.values(), key=lambda b: b["time"])
+        out = []
+        for r in rows:
+            if isinstance(r.bucket, datetime):
+                key = r.bucket.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00.000Z")
+            else:
+                key = str(r.bucket)
+            out.append({"time": key, "total": r.total, "anomalous": int(r.anomalous or 0)})
+        return out
 
     return _cached("events_timeseries", 30.0, build)

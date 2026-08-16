@@ -22,8 +22,15 @@ labeled `MODEL PREDICTION`.
 
 ## 0:00–0:30 · Login & Judge Mode
 
-1. Log in as admin.
+1. Log in as admin (email + password). If SSO is configured (`configured:
+   true` on the login page), mention the Google/GitHub buttons: *"enterprise
+   single sign-on — one click, no password"*.
 2. Open **Judge Mode** (sidebar → Overview → Judge Mode).
+3. Point at the pipeline: **EVENTS → ALERTS → CAMPAIGNS → ATTACK DNA →
+   PREDICTION → BLAST RADIUS → RESPONSE → BLOCKCHAIN PROOF**, each with a real
+   count and a provenance badge.
+4. Read the metrics row aloud — events processed, campaigns detected,
+   MTTD/MTTR, evidence verified, Merkle roots.
 3. Point at the pipeline: **EVENTS → ALERTS → CAMPAIGNS → ATTACK DNA →
    PREDICTION → BLAST RADIUS → RESPONSE → BLOCKCHAIN PROOF**, each with a real
    count and a provenance badge.
@@ -99,6 +106,27 @@ labeled `MODEL PREDICTION`.
 17. Answer questions with **Global Search** (find any IP, hash, campaign,
     evidence) and **SBOM & Supply Chain** (real finding: vite 5.x →
     CVE-2025-30208 from the curated reference, clearly labeled advisory).
+
+---
+
+## Optional extension · SSO & account linking (1 min, needs configured credentials)
+
+1. On the login page click **Continue with Google/GitHub** — full OAuth
+   round-trip: provider consent → back to `/oauth/callback#access=…` → logged
+   in. First-time users are auto-provisioned as `SECURITY_ANALYST`.
+2. **Account linking:** log out, then log in with the *password* account whose
+   email matches your Google/GitHub email → open **Settings → Sign-in
+   methods**: the provider shows **Linked**. Unlink it and re-link to show
+   self-service control. (An SSO-only account like the seeded
+   `sso.demo@cybersentinel.io` cannot unlink its last provider.)
+3. If asked: the audit trail records every SSO event — `AUTH.OAUTH_LOGIN` /
+   `AUTH.OAUTH_LINK` / `AUTH.OAUTH_UNLINK` with actor, provider, IP and
+   timestamp.
+
+> Requires the four OAuth env vars (see `docs/OAUTH_SETUP.md`). If they are
+> not set, the login page shows the buttons disabled with "SSO not
+> configured" — skip this extension and say the platform is enterprise-ready
+> but the demo tenant has password auth enabled.
 
 ---
 

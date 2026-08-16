@@ -3,6 +3,7 @@
 The callback exchanges codes against real provider URLs via httpx — mocked
 here so the full find-or-create-user path is exercised without credentials.
 """
+import uuid
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
@@ -269,6 +270,128 @@ def test_callback_identity_wins_over_email(client, oauth_configured, mock_httpx)
             User.oauth_provider == "google", User.oauth_provider_id == "g-1")).all()
         assert len(users) == 1
         assert users[0].email == "old@example.com"  # original email preserved
+
+
+def _admin_id(client, admin_headers):
+    r = client.get("/api/auth/me", headers=admin_headers)
+    assert r.status_code == 200
+    return r.json()["id"]
+
+
+def test_link_flow_binds_provider_to_signed_in_user(client, oauth_configured, mock_httpx, admin_headers):
+    """Settings-page linking attaches the provider to the CURRENT account."""
+    mock_httpx.mock("POST", "https://oauth2.googleapis.com/token", {"access_token": "tok"})
+    mock_httpx.mock(
+        "GET", "https://www.googleapis.com/oauth2/v2/userinfo",
+        {"id": "link-g-1", "email": "boss@example.com", "email_verified": True, "name": "The Boss"},
+    )
+
+    # Unauthenticated link authorize must be rejected.
+    r = client.get("/api/auth/oauth/google/link")
+    assert r.status_code == 401
+
+    uid = _admin_id(client, admin_headers)
+    r = client.get("/api/auth/oauth/google/link", headers=admin_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["configured"] is True
+    token = None
+    for part in r.headers.get("set-cookie", "").split("; "):
+        if part.startswith("csx_oauth_state="):
+            token = part.split("=", 1)[1]
+    assert token
+    q = parse_qs(urlparse(body["authorize_url"]).query)
+    assert q["state"] == [f"{token}:link:{uid}"]
+
+    r = client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "c-link", "state": f"{token}:link:{uid}"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 307, r.text
+    assert r.headers["location"].endswith("/oauth/callback#linked=google")
+
+    from app.core.database import SessionLocal
+    with SessionLocal() as s:
+        admin = s.get(User, uuid.UUID(uid))
+        assert admin.oauth_provider == "google"
+        assert admin.oauth_provider_id == "link-g-1"
+
+
+def test_link_conflict_returns_409(client, oauth_configured, mock_httpx, admin_headers):
+    """Linking an identity already bound to another account is rejected."""
+    from app.core.database import SessionLocal
+    with SessionLocal() as s:
+        other = User(
+            email="other@example.com", full_name="Other", password_hash="x",
+            is_verified=True, oauth_provider="google", oauth_provider_id="dup-g-1",
+        )
+        s.add(other)
+        s.commit()
+
+    mock_httpx.mock("POST", "https://oauth2.googleapis.com/token", {"access_token": "tok"})
+    mock_httpx.mock(
+        "GET", "https://www.googleapis.com/oauth2/v2/userinfo",
+        {"id": "dup-g-1", "email": "boss@example.com", "email_verified": True, "name": "Boss"},
+    )
+    uid = _admin_id(client, admin_headers)
+    r = client.get("/api/auth/oauth/google/link", headers=admin_headers)
+    token = r.headers.get("set-cookie", "").split("; ")[0].split("=", 1)[1]
+    r = client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "c-dup", "state": f"{token}:link:{uid}"},
+    )
+    assert r.status_code == 409
+    assert "already linked" in r.json()["detail"].lower()
+
+
+def test_unlink_detaches_provider(client, oauth_configured, mock_httpx, admin_headers):
+    """A linked password user can detach the provider; an SSO-only user cannot
+    (it would lose its only sign-in method)."""
+    # Link first via the flow.
+    mock_httpx.mock("POST", "https://oauth2.googleapis.com/token", {"access_token": "tok"})
+    mock_httpx.mock(
+        "GET", "https://www.googleapis.com/oauth2/v2/userinfo",
+        {"id": "un-g-1", "email": "boss@example.com", "email_verified": True, "name": "Boss"},
+    )
+    uid = _admin_id(client, admin_headers)
+    r = client.get("/api/auth/oauth/google/link", headers=admin_headers)
+    token = r.headers.get("set-cookie", "").split("; ")[0].split("=", 1)[1]
+    client.get("/api/auth/oauth/google/callback", params={"code": "c-un", "state": f"{token}:link:{uid}"})
+
+    from app.core.database import SessionLocal
+    with SessionLocal() as s:
+        assert s.get(User, uuid.UUID(uid)).oauth_provider == "google"
+
+    # Unlink as the linked password user.
+    r = client.post("/api/auth/oauth/google/unlink", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    with SessionLocal() as s:
+        admin = s.get(User, uuid.UUID(uid))
+        assert admin.oauth_provider is None
+        assert admin.oauth_provider_id is None
+
+    # An SSO-only user (no password) must NOT be able to unlink — it would
+    # lose its only sign-in method.
+    from app.services.auth_service import build_tokens
+    with SessionLocal() as s:
+        sso_only = User(
+            email="only-sso@example.com", full_name="Only SSO", password_hash="",
+            is_verified=True, oauth_provider="github", oauth_provider_id="only-1",
+        )
+        s.add(sso_only)
+        s.commit()
+        tokens = build_tokens(sso_only, remember_me=True)
+    r = client.post(
+        "/api/auth/oauth/github/unlink",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert r.status_code == 400
+    assert "only sign-in" in r.json()["detail"].lower()
+
+    # Unlinking a provider that isn't linked is a harmless no-op.
+    r = client.post("/api/auth/oauth/github/unlink", headers=admin_headers)
+    assert r.status_code == 200
 
 
 def test_seed_sso_user_cannot_password_login(client):

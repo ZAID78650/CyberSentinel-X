@@ -16,6 +16,7 @@ interface AuthContextValue {
     accept_terms: boolean;
   }) => Promise<AuthResponse>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
   hasRole: (...roles: string[]) => boolean;
 }
 
@@ -79,6 +80,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const handleRefreshUser = useCallback(async () => {
+    try {
+      const res = await api.get<User>("/auth/me");
+      setUser(res.data);
+      tokenStore.setUser(res.data);
+    } catch {
+      setUser(null);
+    }
+  }, []);
+
   const hasRole = useCallback(
     (...roles: string[]) => {
       if (!user) return false;
@@ -95,9 +106,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login: handleLogin,
       register: handleRegister,
       logout: handleLogout,
+      refreshUser: handleRefreshUser,
       hasRole,
     }),
-    [user, isLoading, handleLogin, handleRegister, handleLogout, hasRole],
+    [user, isLoading, handleLogin, handleRegister, handleLogout, handleRefreshUser, hasRole],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

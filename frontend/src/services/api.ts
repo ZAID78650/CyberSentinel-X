@@ -137,6 +137,16 @@ export async function oauthAuthorize(provider: string): Promise<{ configured: bo
   return res.data;
 }
 
+export async function oauthLink(provider: string): Promise<{ configured: boolean; authorize_url?: string; message?: string }> {
+  const res = await api.get(`/auth/oauth/${provider}/link`);
+  return res.data;
+}
+
+export async function oauthUnlink(provider: string): Promise<User> {
+  const res = await api.post<User>(`/auth/oauth/${provider}/unlink`);
+  return res.data;
+}
+
 export function completeOAuth(access: string, refresh: string): void {
   tokenStore.set({ access_token: access, refresh_token: refresh, token_type: "bearer", expires_in: 7 * 24 * 60 * 60 });
   window.dispatchEvent(new CustomEvent("auth:oauth"));

@@ -3,12 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { completeOAuth } from "../services/api";
 
-function readParams(): { access: string | null; refresh: string | null } {
+function readParams(): { access: string | null; refresh: string | null; linked: string | null } {
   // Tokens arrive in the URL fragment (#access=...&refresh=...) so they never
   // hit server/referrer logs. Fall back to the query string for older links.
   const raw = window.location.hash.replace(/^#/, "") || window.location.search.replace(/^\?/, "");
   const params = new URLSearchParams(raw);
-  return { access: params.get("access"), refresh: params.get("refresh") };
+  return { access: params.get("access"), refresh: params.get("refresh"), linked: params.get("linked") };
 }
 
 export default function OAuthCallback() {
@@ -17,8 +17,14 @@ export default function OAuthCallback() {
 
   useEffect(() => {
     if (done.current) return;
-    const { access, refresh } = readParams();
-    if (access && refresh) {
+    const { access, refresh, linked } = readParams();
+    if (linked) {
+      // Account-linking flow completed: the user is already signed in.
+      done.current = true;
+      window.history.replaceState({}, document.title, "/oauth/callback");
+      window.dispatchEvent(new CustomEvent("auth:oauth")); // refresh profile
+      navigate("/settings", { replace: true });
+    } else if (access && refresh) {
       done.current = true;
       completeOAuth(access, refresh);
       // Strip the credentials from the URL now that they are stored.

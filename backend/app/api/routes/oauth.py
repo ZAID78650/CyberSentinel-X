@@ -9,6 +9,7 @@ frontend shows a friendly "SSO not configured" state instead of failing.
 """
 import logging
 import secrets
+import uuid
 from urllib.parse import urlencode
 
 import httpx
@@ -16,11 +17,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_client_ip
+from app.api.deps import get_client_ip, get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.firewall import brute_guard_clear
 from app.models.user import User
+from app.schemas.auth import UserOut
 from app.services.auth_service import build_tokens, get_or_create_role
 from app.services.audit import log_action
 
@@ -80,16 +82,8 @@ def _redirect_uri(provider: str) -> str:
     return get_settings().backend_url.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
 
 
-@router.get("/{provider}/authorize")
-def authorize(provider: str, response: Response):
-    cfg = _provider_config(provider)
-    client_id, _secret = _client_ids(provider)
-    if not client_id:
-        return {"provider": provider, "configured": False,
-                "message": f"{provider.capitalize()} SSO is not configured. Add {cfg['client_id_env']} to your environment."}
-
-    # CSRF protection: the state token is issued as an HttpOnly cookie and
-    # must be echoed back by the provider on the callback. Validated there.
+def _state_cookie(response: Response) -> str:
+    """Issue the CSRF state cookie and return the bare token."""
     state = secrets.token_urlsafe(24)
     response.set_cookie(
         key="csx_oauth_state",
@@ -100,14 +94,82 @@ def authorize(provider: str, response: Response):
         secure=(get_settings().environment == "production"),
         path="/api/auth/oauth",
     )
+    return state
+
+
+def _build_authorize_url(provider: str, state_param: str) -> str:
+    cfg = _provider_config(provider)
+    client_id, _secret = _client_ids(provider)
     params = {
         "client_id": client_id,
         "redirect_uri": _redirect_uri(provider),
         "response_type": "code",
         "scope": cfg["scope"],
-        "state": state,
+        "state": state_param,
     }
-    return {"provider": provider, "configured": True, "authorize_url": f"{cfg['authorize_url']}?{urlencode(params)}"}
+    return f"{cfg['authorize_url']}?{urlencode(params)}"
+
+
+@router.get("/{provider}/authorize")
+def authorize(provider: str, response: Response):
+    cfg = _provider_config(provider)
+    client_id, _secret = _client_ids(provider)
+    if not client_id:
+        return {"provider": provider, "configured": False,
+                "message": f"{provider.capitalize()} SSO is not configured. Add {cfg['client_id_env']} to your environment."}
+    state = _state_cookie(response)
+    return {"provider": provider, "configured": True, "authorize_url": _build_authorize_url(provider, state)}
+
+
+@router.get("/{provider}/link")
+def link_authorize(
+    provider: str,
+    response: Response,
+    user: User = Depends(get_current_user),
+):
+    """Start the OAuth flow to LINK a provider to the signed-in account.
+
+    The target user id is encoded into the provider's echoed `state` param
+    (token:link:<uid>); the CSRF cookie still carries the bare token.
+    """
+    cfg = _provider_config(provider)
+    client_id, _secret = _client_ids(provider)
+    if not client_id:
+        return {"provider": provider, "configured": False,
+                "message": f"{provider.capitalize()} SSO is not configured. Add {cfg['client_id_env']} to your environment."}
+    state = _state_cookie(response)
+    return {
+        "provider": provider,
+        "configured": True,
+        "authorize_url": _build_authorize_url(provider, f"{state}:link:{user.id}"),
+    }
+
+
+@router.post("/{provider}/unlink", response_model=UserOut)
+def unlink(
+    provider: str,
+    user: User = Depends(get_current_user),
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    """Detach a linked provider identity from the current account."""
+    _provider_config(provider)  # 404 for unknown providers
+    if user.oauth_provider != provider:
+        return user
+    if not user.password_hash:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot unlink your only sign-in method — set a password first.",
+        )
+    user.oauth_provider = None
+    user.oauth_provider_id = None
+    db.commit()
+    db.refresh(user)
+    log_action(db, actor=user.email, action="AUTH.OAUTH_UNLINK",
+               target_type="user", target_id=str(user.id),
+               detail={"provider": provider},
+               ip_address=get_client_ip(request) if request else None)
+    return user
 
 
 @router.get("/{provider}/callback")
@@ -130,8 +192,14 @@ async def callback(
         raise HTTPException(status_code=503, detail=f"{provider.capitalize()} SSO is not configured on the server.")
 
     # CSRF: the state must match the one we issued in the authorize cookie.
+    # The state param may carry `token:link:<user_id>` for account-linking
+    # flows started from the settings page.
+    parts = state.split(":")
+    token, mode = parts[0], (parts[1] if len(parts) > 1 else "login")
+    link_uid = parts[2] if len(parts) > 2 else ""
     expected_state = request.cookies.get("csx_oauth_state") if request else None
-    if not expected_state or not secrets.compare_digest(state, expected_state):
+    # compare_digest raises on differing lengths — guard before comparing.
+    if not expected_state or len(token) != len(expected_state) or not secrets.compare_digest(token, expected_state):
         raise HTTPException(status_code=400, detail="OAuth state mismatch. Please try again.")
 
     redirect_uri = _redirect_uri(provider)
@@ -173,11 +241,46 @@ async def callback(
         logger.error("oauth userinfo error: %s", exc)
         raise HTTPException(status_code=502, detail="OAuth provider unreachable")
 
-    # Google: only accept verified accounts; GitHub: profile.email may be null
-    # when the user keeps their email private — fetch /user/emails in that case.
     email = (profile.get("email") or "").lower()
+    # Google: only accept verified accounts (both login and linking).
     if provider == "google" and profile.get("email_verified") is False:
         raise HTTPException(status_code=400, detail="Google account email is not verified.")
+    provider_id = str(profile.get("id") or profile.get("sub") or "")
+
+    # --- Account linking flow (started from Settings) -----------------------
+    if mode == "link":
+        if not provider_id:
+            raise HTTPException(status_code=400, detail=f"{provider.capitalize()} did not return an identity.")
+        try:
+            target = db.get(User, uuid.UUID(link_uid))
+        except (ValueError, TypeError):
+            target = None
+        if target is None:
+            raise HTTPException(status_code=404, detail="Target account not found.")
+        if not target.is_active:
+            raise HTTPException(status_code=403, detail="Account is disabled")
+        existing = db.scalar(select(User).where(
+            User.oauth_provider == provider, User.oauth_provider_id == provider_id))
+        if existing is not None and existing.id != target.id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This {provider.capitalize()} account is already linked to {existing.email}.",
+            )
+        target.oauth_provider = provider
+        target.oauth_provider_id = provider_id
+        target.is_verified = True
+        target.last_login_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        db.commit()
+        log_action(db, actor=target.email, action="AUTH.OAUTH_LINK",
+                   target_type="user", target_id=str(target.id),
+                   detail={"provider": provider},
+                   ip_address=get_client_ip(request) if request else None)
+        fe = get_settings().frontend_url.rstrip("/")
+        return __import__("fastapi").responses.RedirectResponse(f"{fe}/oauth/callback#linked={provider}")
+
+    # --- Login flow ---------------------------------------------------------
+    # GitHub: profile.email may be null when the user keeps their email
+    # private — fetch /user/emails in that case.
     if provider == "github" and not email:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -201,7 +304,6 @@ async def callback(
     #    If an account already exists with the same email, the provider
     #    identity is linked to it (SSO account linking) rather than creating a
     #    duplicate.
-    provider_id = str(profile.get("id") or profile.get("sub") or "")
     user = None
     if provider_id:
         user = db.scalar(select(User).where(

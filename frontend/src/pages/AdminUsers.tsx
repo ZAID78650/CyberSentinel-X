@@ -113,6 +113,7 @@ export default function AdminUsers() {
                   <th className="py-2.5 pr-4 font-semibold">Roles</th>
                   <th className="py-2.5 pr-4 font-semibold">Sign-in method</th>
                   <th className="py-2.5 pr-4 font-semibold">Status</th>
+                  <th className="py-2.5 pr-4 font-semibold">Joined</th>
                   <th className="py-2.5 font-semibold">Last login</th>
                 </tr>
               </thead>
@@ -141,6 +142,9 @@ export default function AdminUsers() {
                         {u.is_active ? "Active" : "Disabled"}
                         {u.is_verified ? "" : " · Unverified"}
                       </span>
+                    </td>
+                    <td className="py-3 pr-4 text-xs text-slate-500">
+                      {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                     </td>
                     <td className="py-3 text-xs text-slate-500">
                       {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}

@@ -83,9 +83,12 @@ services:
         value: https://cybersentinel-backend-t5pv.onrender.com
       # Google / GitHub OAuth (SSO). Create an OAuth app per provider and set
       # the values in the Render dashboard (sync: false = not overwritten by
-      # this blueprint). Register these exact redirect URIs with the provider:
-      #   Google:  https://cybersentinel-backend-t5pv.onrender.com/api/auth/oauth/google/callback
-      #   GitHub:  https://cybersentinel-backend-t5pv.onrender.com/api/auth/oauth/github/callback
+      # this blueprint). Register these exact redirect URIs with the provider
+      # (they must be on the FRONTEND origin — /api is proxied to this backend,
+      # so the CSRF state cookie, set on the frontend host, reaches the
+      # callback only if the provider redirects the browser back there):
+      #   Google:  https://cybersentinel-frontend.onrender.com/api/auth/oauth/google/callback
+      #   GitHub:  https://cybersentinel-frontend.onrender.com/api/auth/oauth/github/callback
       # See docs/OAUTH_SETUP.md for the full walkthrough.
       - key: GOOGLE_CLIENT_ID
         sync: false

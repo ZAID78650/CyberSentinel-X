@@ -10,15 +10,23 @@ set four environment variables.
 
 ## Redirect URIs (register these with the providers)
 
+> ⚠️ The callback must be on the **frontend origin**, not the backend's. The
+> browser reaches `/api` through the frontend's nginx (or Vite dev) proxy, so
+> the CSRF state cookie is stored on the **frontend host**. The provider must
+> redirect the browser back to that same host, or the cookie is never sent and
+> every login fails with *"OAuth state mismatch"*. The backend computes the
+> redirect URI from `FRONTEND_URL` automatically.
+
 | Provider | Redirect URI |
 |---|---|
-| Google | `https://cybersentinel-backend-t5pv.onrender.com/api/auth/oauth/google/callback` |
-| GitHub | `https://cybersentinel-backend-t5pv.onrender.com/api/auth/oauth/github/callback` |
+| Google | `https://cybersentinel-frontend.onrender.com/api/auth/oauth/google/callback` |
+| GitHub | `https://cybersentinel-frontend.onrender.com/api/auth/oauth/github/callback` |
 
-For **local development**, additionally register:
+For **local development**, additionally register (Vite proxies `/api` from
+5173 → 8000):
 
-- `http://localhost:8000/api/auth/oauth/google/callback`
-- `http://localhost:8000/api/auth/oauth/github/callback`
+- `http://localhost:5173/api/auth/oauth/google/callback`
+- `http://localhost:5173/api/auth/oauth/github/callback`
 
 ---
 
@@ -59,8 +67,8 @@ set; the blueprint's `sync: false` entries never overwrite them). The deploy
 restarts automatically and the login page buttons flip to enabled.
 
 **Local:** add the same four keys to `backend/.env` (see
-`backend/.env.example`), with `BACKEND_URL=http://localhost:8000` and
-`FRONTEND_URL=http://localhost:5173` for local testing.
+`backend/.env.example`), with `FRONTEND_URL=http://localhost:5173` for local
+testing (the redirect URI is built from `FRONTEND_URL`, not `BACKEND_URL`).
 
 ## 4. Verify
 

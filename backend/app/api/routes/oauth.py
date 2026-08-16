@@ -79,7 +79,17 @@ def list_providers():
 
 
 def _redirect_uri(provider: str) -> str:
-    return get_settings().backend_url.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
+    """The callback URL registered with the provider.
+
+    This MUST live on the FRONTEND origin, not the backend's: the browser
+    reaches /api through the frontend's nginx (or Vite dev) proxy, so the
+    CSRF state cookie is set on the frontend host. The provider redirects the
+    browser to the callback on that same host, the cookie is sent, and nginx
+    proxies the request (cookie intact) to the backend. If we pointed the
+    provider at the backend origin instead, the cookie would never be sent
+    and every login would fail with "OAuth state mismatch".
+    """
+    return get_settings().frontend_url.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
 
 
 def _state_cookie(response: Response) -> str:
@@ -222,6 +232,10 @@ async def callback(
                 },
                 headers=headers,
             )
+            if token_res.status_code >= 400:
+                logger.warning("oauth token exchange HTTP %s for %s: %s",
+                               token_res.status_code, provider, token_res.text[:300])
+                raise HTTPException(status_code=401, detail="OAuth token exchange failed")
             token_payload = token_res.json()
             access_token = token_payload.get("access_token")
             if not access_token:
@@ -236,6 +250,10 @@ async def callback(
         async with httpx.AsyncClient(timeout=15) as client:
             headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
             profile_res = await client.get(cfg["userinfo_url"], headers=headers)
+            if profile_res.status_code >= 400:
+                logger.warning("oauth userinfo HTTP %s for %s: %s",
+                               profile_res.status_code, provider, profile_res.text[:300])
+                raise HTTPException(status_code=401, detail="Could not fetch your profile from the provider")
             profile = profile_res.json()
     except httpx.HTTPError as exc:
         logger.error("oauth userinfo error: %s", exc)

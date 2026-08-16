@@ -44,8 +44,10 @@ def oauth_unconfigured(monkeypatch):
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
+        self.text = str(payload)[:300]
 
     def json(self):
         return self._payload
@@ -67,12 +69,20 @@ class _FakeClient:
         return False
 
     async def post(self, url, **kwargs):
-        return _FakeResponse(self.responses.get(("POST", url), {"access_token": "tok"}))
+        entry = self.responses.get(("POST", url), {"access_token": "tok"})
+        if isinstance(entry, tuple):
+            entry, code = entry
+            return _FakeResponse(entry, status_code=code)
+        return _FakeResponse(entry)
 
     async def get(self, url, **kwargs):
         if ("GET", url) not in self.responses:
             raise AssertionError(f"unmocked GET {url}")
-        return _FakeResponse(self.responses[("GET", url)])
+        entry = self.responses[("GET", url)]
+        if isinstance(entry, tuple):
+            entry, code = entry
+            return _FakeResponse(entry, status_code=code)
+        return _FakeResponse(entry)
 
 
 @pytest.fixture()
@@ -118,9 +128,49 @@ def test_authorize_sets_state_cookie_and_builds_redirect(client, oauth_configure
     url = r.json()["authorize_url"]
     q = parse_qs(urlparse(url).query)
     assert q["client_id"] == ["google-id-test"]
-    assert q["redirect_uri"] == ["http://localhost:8000/api/auth/oauth/google/callback"]
+    # The callback MUST live on the FRONTEND origin: the CSRF state cookie is
+    # set on the frontend host (the browser reaches /api via the frontend's
+    # nginx/Vite proxy), so the provider's redirect back must land there too
+    # or the cookie is never sent and login fails with a state mismatch.
+    assert q["redirect_uri"] == ["http://localhost:5173/api/auth/oauth/google/callback"]
     assert q["state"] == [state]
     assert q["response_type"] == ["code"]
+
+
+def test_redirect_uri_origin_matches_cookie_origin(client, oauth_configured):
+    """Regression: redirect_uri host must equal the frontend host where the
+    state cookie is set — otherwise cross-origin login breaks even with creds."""
+    r, _state = _authorize(client, "github")
+    url = r.json()["authorize_url"]
+    q = parse_qs(urlparse(url).query)
+    redirect_host = urlparse(q["redirect_uri"][0]).netloc
+    assert redirect_host == "localhost:5173"  # frontend_url in FAKE_SETTINGS
+    assert redirect_host != "localhost:8000"  # backend_url must NOT be used
+
+
+def test_callback_token_exchange_http_error(client, oauth_configured, mock_httpx):
+    """A non-2xx token exchange (bad code, revoked app) is a clean 401."""
+    mock_httpx.mock("POST", "https://github.com/login/oauth/access_token",
+                    ({"error": "bad_verification_code"}, 400))
+    _authorize(client, "github")
+    r = client.get(
+        "/api/auth/oauth/github/callback",
+        params={"code": "bad", "state": client.cookies.get("csx_oauth_state")},
+    )
+    assert r.status_code == 401
+
+
+def test_callback_userinfo_http_error(client, oauth_configured, mock_httpx):
+    """A non-2xx userinfo response (revoked token) is a clean 401."""
+    mock_httpx.mock("POST", "https://oauth2.googleapis.com/token", {"access_token": "tok"})
+    mock_httpx.mock("GET", "https://www.googleapis.com/oauth2/v2/userinfo",
+                    ({"error": "invalid_token"}, 401))
+    _authorize(client, "google")
+    r = client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "code-x", "state": client.cookies.get("csx_oauth_state")},
+    )
+    assert r.status_code == 401
 
 
 def test_callback_rejects_state_mismatch(client, oauth_configured):

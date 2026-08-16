@@ -241,12 +241,17 @@ def attack_distribution(
     """
 
     def build():
+        # Dialect-aware JSON key extraction. The generic JSON comparator is
+        # not portable here: SQLite's JSON_QUOTE() wraps results in quotes and
+        # returns the literal 'null', while on Postgres the generic JSON type
+        # has no .astext and CAST(-> AS VARCHAR) keeps the JSON quotes — so
+        # SQLite uses json_extract() and Postgres json_extract_path_text(),
+        # both of which return the bare text value.
         dialect = db.get_bind().dialect.name
         if dialect == "sqlite":
-            # SQLite lacks Postgres' ->/->> operators; use the JSON1 function.
             cat_raw = func.json_extract(SecurityEvent.metadata_, "$.attack_cat")
         else:
-            cat_raw = SecurityEvent.metadata_["attack_cat"].astext
+            cat_raw = func.json_extract_path_text(SecurityEvent.metadata_, "attack_cat")
         cat_expr = func.coalesce(func.nullif(cat_raw, ""), "Normal")
         rows = db.execute(
             select(

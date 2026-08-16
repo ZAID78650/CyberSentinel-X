@@ -8,6 +8,9 @@ that responses are aggregate-shaped, not one-row-per-event.
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func, select
+from sqlalchemy.dialects import postgresql, sqlite
+
 from app.models.security import SecurityEvent
 
 
@@ -101,6 +104,30 @@ def test_events_timeseries_buckets_in_sql(db_session, client, admin_headers):
     # hourKey() equality check expects (this is what makes WS live bumps work).
     import re
     assert all(re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$", b["time"]) for b in buckets)
+
+
+def test_attack_distribution_compiles_portably():
+    """The JSON category extraction must compile to the right operator per
+    dialect. Regression guard: the generic JSON type has no .astext (raises
+    AttributeError at runtime on Postgres), SQLite's JSON_QUOTE wraps results
+    in quotes, and CAST(-> AS VARCHAR) keeps the JSON quotes on Postgres —
+    so the Postgres branch must use json_extract_path_text().
+    """
+    def stmt_for(cat_raw):
+        cat_expr = func.coalesce(func.nullif(cat_raw, ""), "Normal")
+        return select(
+            cat_expr.label("category"),
+            func.extract("hour", SecurityEvent.timestamp).label("hour"),
+            func.count().label("count"),
+        ).where(SecurityEvent.is_anomalous.is_(True)).group_by("category", "hour")
+
+    sqlite_sql = str(stmt_for(func.json_extract(SecurityEvent.metadata_, "$.attack_cat")).compile(dialect=sqlite.dialect()))
+    assert "json_extract" in sqlite_sql
+    assert "JSON_QUOTE" not in sqlite_sql
+
+    pg_sql = str(stmt_for(func.json_extract_path_text(SecurityEvent.metadata_, "attack_cat")).compile(dialect=postgresql.dialect()))
+    assert "json_extract_path_text" in pg_sql
+    assert "JSON_QUOTE" not in pg_sql
 
 
 def test_threat_space_column_projection(db_session, client, admin_headers):

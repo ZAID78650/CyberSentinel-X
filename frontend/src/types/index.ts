@@ -8,6 +8,7 @@ export interface User {
   is_active: boolean;
   is_verified: boolean;
   last_login_at?: string | null;
+  oauth_provider?: string | null;
   roles: string[];
 }
 

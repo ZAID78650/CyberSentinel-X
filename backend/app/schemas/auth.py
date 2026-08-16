@@ -65,6 +65,7 @@ class UserOut(BaseModel):
     is_active: bool
     is_verified: bool
     last_login_at: Optional[datetime] = None
+    oauth_provider: Optional[str] = None
     roles: List[str] = []
 
     @field_validator("roles", mode="before")

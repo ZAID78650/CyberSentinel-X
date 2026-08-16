@@ -173,7 +173,12 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold text-slate-200">{user?.full_name}</p>
-              <p className="truncate text-[10px] text-slate-500">{user?.roles.join(", ")}</p>
+              <p className="truncate text-[10px] text-slate-500">
+                {user?.roles.join(", ")}
+                {user?.oauth_provider
+                  ? ` · via ${user.oauth_provider.charAt(0).toUpperCase() + user.oauth_provider.slice(1)}`
+                  : ""}
+              </p>
             </div>
             <button onClick={handleLogout} title="Log out" className="text-slate-500 hover:text-cyber-red">
               <LogOut className="h-4 w-4" />

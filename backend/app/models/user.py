@@ -30,6 +30,12 @@ class Role(Base, UUIDMixin, TimestampMixin):
 
 class User(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "users"
+    __table_args__ = (
+        # A provider identity (e.g. google + 117…) maps to exactly one user,
+        # so SSO logins stay attached to the same account even if the email
+        # changes. NULL for password-only accounts.
+        UniqueConstraint("oauth_provider", "oauth_provider_id", name="uq_users_oauth_identity"),
+    )
 
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -38,6 +44,8 @@ class User(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    oauth_provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    oauth_provider_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     roles: Mapped[List[Role]] = relationship(secondary=user_roles, back_populates="users")
     devices: Mapped[List["Device"]] = relationship(back_populates="user", cascade="all, delete-orphan")

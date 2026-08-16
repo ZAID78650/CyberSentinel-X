@@ -135,7 +135,7 @@ def test_callback_google_flow_creates_user(client, oauth_configured, mock_httpx)
     mock_httpx.mock("POST", "https://oauth2.googleapis.com/token", {"access_token": "tok"})
     mock_httpx.mock(
         "GET", "https://www.googleapis.com/oauth2/v2/userinfo",
-        {"email": "Analyst.Example@gmail.com", "email_verified": True,
+        {"id": "g-100", "email": "Analyst.Example@gmail.com", "email_verified": True,
          "name": "Analyst Example", "given_name": "Analyst"},
     )
 
@@ -159,6 +159,7 @@ def test_callback_google_flow_creates_user(client, oauth_configured, mock_httpx)
         assert user.full_name == "Analyst Example"
         assert user.is_verified is True
         assert user.password_hash == ""
+        assert user.oauth_provider == "google"
 
 
 def test_callback_google_rejects_unverified_email(client, oauth_configured, mock_httpx):
@@ -199,6 +200,92 @@ def test_callback_github_private_email(client, oauth_configured, mock_httpx):
         user = s.scalar(select(User).where(User.email == "dev42@example.com"))
         assert user is not None
         assert user.full_name == "Dev Forty-Two"
+
+
+def _run_oauth(client, provider, code, profile):
+    """Run authorize + callback with a fresh state cookie and return the response."""
+    _authorize(client, provider)
+    return client.get(
+        f"/api/auth/oauth/{provider}/callback",
+        params={"code": code, "state": client.cookies.get("csx_oauth_state")},
+        follow_redirects=False,
+    )
+
+
+def test_callback_links_existing_password_user(client, oauth_configured, mock_httpx):
+    """An existing password account signing in via SSO gets the identity linked,
+    not a duplicate, and keeps its password login intact."""
+    mock_httpx.mock("POST", "https://github.com/login/oauth/access_token", {"access_token": "tok"})
+    mock_httpx.mock(
+        "GET", "https://api.github.com/user",
+        {"id": 424242, "login": "avasec", "email": "analyst@cybersentinel.io", "name": "Ava Security Analyst"},
+    )
+
+    r = _run_oauth(client, "github", "code-link", {"id": 424242})
+    assert r.status_code == 307, r.text
+
+    from app.core.database import SessionLocal
+    with SessionLocal() as s:
+        users = s.scalars(select(User).where(User.email == "analyst@cybersentinel.io")).all()
+        assert len(users) == 1
+        user = users[0]
+        assert user.oauth_provider == "github"
+        assert user.oauth_provider_id == "424242"
+        assert user.password_hash  # password login still works
+
+
+def test_callback_identity_wins_over_email(client, oauth_configured, mock_httpx):
+    """Once an identity is bound, logging in with the same provider id but a
+    different email maps to the SAME account (email renamed upstream)."""
+    mock_httpx.mock("POST", "https://oauth2.googleapis.com/token", {"access_token": "tok"})
+
+    _authorize(client, "google")
+    mock_httpx.mock(
+        "GET", "https://www.googleapis.com/oauth2/v2/userinfo",
+        {"id": "g-1", "email": "old@example.com", "email_verified": True, "name": "Old Email"},
+    )
+    r1 = client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "c1", "state": client.cookies.get("csx_oauth_state")},
+        follow_redirects=False,
+    )
+    assert r1.status_code == 307
+
+    mock_httpx.mock(
+        "GET", "https://www.googleapis.com/oauth2/v2/userinfo",
+        {"id": "g-1", "email": "new@example.com", "email_verified": True, "name": "New Email"},
+    )
+    _authorize(client, "google")
+    r2 = client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "c2", "state": client.cookies.get("csx_oauth_state")},
+        follow_redirects=False,
+    )
+    assert r2.status_code == 307
+
+    from app.core.database import SessionLocal
+    with SessionLocal() as s:
+        users = s.scalars(select(User).where(
+            User.oauth_provider == "google", User.oauth_provider_id == "g-1")).all()
+        assert len(users) == 1
+        assert users[0].email == "old@example.com"  # original email preserved
+
+
+def test_seed_sso_user_cannot_password_login(client):
+    """The seeded SSO-only account is verified but has no password, so password
+    login is rejected while the account exists for SSO linking."""
+    from app.core.database import SessionLocal
+    with SessionLocal() as s:
+        user = s.scalar(select(User).where(User.email == "sso.demo@cybersentinel.io"))
+        assert user is not None
+        assert user.is_verified is True
+        assert user.password_hash == ""
+
+    r = client.post(
+        "/api/auth/login",
+        json={"email": "sso.demo@cybersentinel.io", "password": "anything"},
+    )
+    assert r.status_code == 401
 
 
 def test_callback_reuses_existing_user(client, oauth_configured, mock_httpx):

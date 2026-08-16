@@ -72,6 +72,22 @@ restarts automatically and the login page buttons flip to enabled.
 3. First-time SSO users are auto-provisioned as `SECURITY_ANALYST` with a
    verified account (no password needed).
 
+## Account linking
+
+- **New provider account** → provisioned automatically (`SECURITY_ANALYST`,
+  verified, no password).
+- **Existing account, same email** → the provider identity is **linked** to it
+  (no duplicate is created) and the user's password login keeps working.
+- **Identity takes precedence** — once linked, repeat SSO logins match by
+  `provider + provider_id`, so a renamed provider email still lands on the
+  same account.
+- The account menu shows `via Google` / `via GitHub` on linked accounts.
+
+A seeded SSO-only demo user `sso.demo@cybersentinel.io` (verified, no
+password) exists in fresh databases — it can only sign in through a provider
+that returns that email, demonstrating the linking path. Password login is
+rejected for it by design.
+
 ## Notes
 
 - If the app returns "OAuth state mismatch", just click the button again — the

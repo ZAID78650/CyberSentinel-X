@@ -26,6 +26,11 @@ DEMO_USERS = [
      "password": "Analyst@2026", "role": "SECURITY_ANALYST"},
     {"email": "viewer@cybersentinel.io", "full_name": "Vikram Viewer", "org": "CyberSentinel SOC",
      "password": "Viewer@2026", "role": "VIEWER"},
+    # SSO-only demo account: verified but no password, so it can ONLY sign in
+    # via Google/GitHub. When the presenter logs in with a provider email that
+    # matches, the account is linked (see docs/OAUTH_SETUP.md).
+    {"email": "sso.demo@cybersentinel.io", "full_name": "Sam SSO Analyst", "org": "CyberSentinel SOC",
+     "password": None, "role": "SECURITY_ANALYST"},
 ]
 
 ASSETS = [
@@ -73,7 +78,8 @@ def seed_users(db: Session) -> int:
             continue
         from app.core.security import hash_password
         user = User(email=u["email"], full_name=u["full_name"], organization=u["org"],
-                    password_hash=hash_password(u["password"]), is_verified=True)
+                    password_hash=hash_password(u["password"]) if u.get("password") else "",
+                    is_verified=u.get("is_verified", True))
         role = get_or_create_role(db, u["role"])
         user.roles.append(role)
         db.add(user)

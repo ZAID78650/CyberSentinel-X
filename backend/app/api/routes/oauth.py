@@ -196,9 +196,20 @@ async def callback(
 
     full_name = profile.get("name") or profile.get("login") or profile.get("given_name", "") or email.split("@")[0]
 
-    # 3) Find or create the user
-    user = db.scalar(select(User).where(User.email == email))
+    # 3) Find, link, or create the user. The provider identity (provider + id)
+    #    wins over email, so a renamed email still maps to the same account.
+    #    If an account already exists with the same email, the provider
+    #    identity is linked to it (SSO account linking) rather than creating a
+    #    duplicate.
+    provider_id = str(profile.get("id") or profile.get("sub") or "")
+    user = None
+    if provider_id:
+        user = db.scalar(select(User).where(
+            User.oauth_provider == provider, User.oauth_provider_id == provider_id))
+    if user is None and email:
+        user = db.scalar(select(User).where(User.email == email))
     created = False
+    linked = False
     if user is None:
         from app.services.auth_service import ensure_default_roles
         ensure_default_roles(db)
@@ -208,6 +219,8 @@ async def callback(
             organization=f"Via {provider.capitalize()}",
             password_hash="",  # OAuth users have no password; login via provider only
             is_verified=True,
+            oauth_provider=provider if provider_id else None,
+            oauth_provider_id=provider_id or None,
         )
         role = get_or_create_role(db, "SECURITY_ANALYST")
         user.roles.append(role)
@@ -215,6 +228,13 @@ async def callback(
         created = True
     elif not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
+    else:
+        # Account linking: bind the provider identity to the existing account.
+        # Idempotent for repeat logins of an already-linked account.
+        if provider_id and (user.oauth_provider != provider or user.oauth_provider_id != provider_id):
+            user.oauth_provider = provider
+            user.oauth_provider_id = provider_id
+            linked = True
 
     user.last_login_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
     db.commit()
@@ -223,7 +243,7 @@ async def callback(
 
     log_action(db, actor=user.email, action="AUTH.OAUTH_LOGIN",
                target_type="user", target_id=str(user.id),
-               detail={"provider": provider, "created": created},
+               detail={"provider": provider, "created": created, "linked": linked},
                ip_address=get_client_ip(request) if request else None)
 
     tokens = build_tokens(user, remember_me=True)

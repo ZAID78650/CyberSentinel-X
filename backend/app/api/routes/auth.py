@@ -1,16 +1,18 @@
 """Authentication routes."""
+import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_client_ip, get_current_user, get_request_id, require_roles
 from app.core.database import get_db
 from app.core.rate_limit import RateLimiter
 from app.core.config import get_settings
-from app.models.user import User
+from app.models.user import Role, User
 from app.schemas.auth import (
+    AdminPasswordReset,
     AuthResponse,
     ForgotPasswordRequest,
     LoginRequest,
@@ -19,8 +21,12 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
     UserOut,
+    UserRolesUpdate,
+    UserStatusUpdate,
 )
 from app.services.auth_service import AuthError, authenticate, build_tokens, refresh_access_token, register
+
+KNOWN_ROLES = ("ADMIN", "SECURITY_ANALYST", "VIEWER")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = RateLimiter(max_requests=get_settings().rate_limit_max_requests,
@@ -130,6 +136,98 @@ def list_users(db: Session = Depends(get_db), _: User = Depends(require_roles("A
         select(User).options(selectinload(User.roles)).order_by(User.created_at.desc())
     ).all()
     return [UserOut.model_validate(u) for u in users]
+
+
+def _get_user_or_404(db: Session, user_id: uuid.UUID) -> User:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@router.post("/users/{user_id}/status", response_model=UserOut)
+def set_user_status(
+    user_id: uuid.UUID,
+    req: UserStatusUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: enable or disable an account (no self-disable)."""
+    from app.services.audit import log_action
+    user = _get_user_or_404(db, user_id)
+    if user.id == admin.id and not req.is_active:
+        raise HTTPException(status_code=400, detail="You cannot disable your own account.")
+    user.is_active = req.is_active
+    db.commit()
+    db.refresh(user)
+    log_action(db, actor=admin.email, action="AUTH.USER_ACTIVE_CHANGED",
+               target_type="user", target_id=str(user.id),
+               detail={"is_active": req.is_active},
+               ip_address=get_client_ip(request))
+    return UserOut.model_validate(user)
+
+
+@router.post("/users/{user_id}/password", response_model=UserOut)
+def admin_reset_password(
+    user_id: uuid.UUID,
+    req: AdminPasswordReset,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: force-set a user's password (also gives SSO-only accounts a fallback)."""
+    from app.core.security import hash_password
+    from app.services.audit import log_action
+    user = _get_user_or_404(db, user_id)
+    user.password_hash = hash_password(req.new_password)
+    db.commit()
+    db.refresh(user)
+    log_action(db, actor=admin.email, action="AUTH.USER_PASSWORD_RESET",
+               target_type="user", target_id=str(user.id),
+               ip_address=get_client_ip(request))
+    return UserOut.model_validate(user)
+
+
+@router.put("/users/{user_id}/roles", response_model=UserOut)
+def update_user_roles(
+    user_id: uuid.UUID,
+    req: UserRolesUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("ADMIN")),
+):
+    """Admin: replace an account's roles, keeping the platform safe."""
+    from app.services.audit import log_action
+    user = _get_user_or_404(db, user_id)
+
+    unknown = sorted(set(req.roles) - set(KNOWN_ROLES))
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown roles: {', '.join(unknown)}")
+    if user.id == admin.id and "ADMIN" not in req.roles:
+        raise HTTPException(status_code=400, detail="You cannot remove your own ADMIN role.")
+    if "ADMIN" in user.role_names and "ADMIN" not in req.roles:
+        other_admins = db.scalar(
+            select(func.count())
+            .select_from(User)
+            .join(User.roles)
+            .where(Role.name == "ADMIN", User.is_active.is_(True), User.id != user.id)
+        ) or 0
+        if other_admins == 0:
+            raise HTTPException(status_code=400, detail="Cannot remove the last active ADMIN account.")
+
+    role_objs = db.scalars(select(Role).where(Role.name.in_(req.roles))).all()
+    by_name = {r.name: r for r in role_objs}
+    if len(by_name) != len(set(req.roles)):
+        raise HTTPException(status_code=400, detail="One or more roles do not exist.")
+    user.roles = [by_name[r] for r in req.roles]
+    db.commit()
+    db.refresh(user)
+    log_action(db, actor=admin.email, action="AUTH.USER_ROLES_CHANGED",
+               target_type="user", target_id=str(user.id),
+               detail={"roles": req.roles},
+               ip_address=get_client_ip(request))
+    return UserOut.model_validate(user)
 
 
 @router.post("/forgot-password", status_code=200)

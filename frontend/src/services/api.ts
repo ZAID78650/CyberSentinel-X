@@ -161,6 +161,21 @@ export async function listUsers(): Promise<User[]> {
   return res.data;
 }
 
+export async function setUserStatus(userId: string, isActive: boolean): Promise<User> {
+  const res = await api.post<User>(`/auth/users/${userId}/status`, { is_active: isActive });
+  return res.data;
+}
+
+export async function adminResetPassword(userId: string, newPassword: string): Promise<User> {
+  const res = await api.post<User>(`/auth/users/${userId}/password`, { new_password: newPassword });
+  return res.data;
+}
+
+export async function updateUserRoles(userId: string, roles: string[]): Promise<User> {
+  const res = await api.put<User>(`/auth/users/${userId}/roles`, { roles });
+  return res.data;
+}
+
 export function completeOAuth(access: string, refresh: string): void {
   tokenStore.set({ access_token: access, refresh_token: refresh, token_type: "bearer", expires_in: 7 * 24 * 60 * 60 });
   window.dispatchEvent(new CustomEvent("auth:oauth"));

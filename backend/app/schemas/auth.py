@@ -110,5 +110,29 @@ class AuthResponse(BaseModel):
     tokens: TokenResponse
 
 
+class UserStatusUpdate(BaseModel):
+    """Admin: enable or disable an account."""
+    is_active: bool
+
+
+class AdminPasswordReset(BaseModel):
+    """Admin: force-set a user's password (no current password needed)."""
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one number")
+        if not any(c.isalpha() for c in v):
+            raise ValueError("Password must contain at least one letter")
+        return v
+
+
+class UserRolesUpdate(BaseModel):
+    """Admin: replace the roles on an account."""
+    roles: List[str] = Field(min_length=1)
+
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr

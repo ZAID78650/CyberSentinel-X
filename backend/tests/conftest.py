@@ -9,6 +9,9 @@ import tempfile
 
 os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.mkdtemp()}/test.db"
 os.environ["ENVIRONMENT"] = "test"
+# All tests share the TestClient "IP", so the per-IP login rate limiter
+# (20/60s default) would 429 long-running suites. Lift it for tests only.
+os.environ["RATE_LIMIT_MAX_REQUESTS"] = "10000"
 os.environ["LLM_PROVIDER"] = "local"
 os.environ["VECTOR_DB_BACKEND"] = "local"
 os.environ["VECTOR_DB_PATH"] = f"{tempfile.mkdtemp()}/vector_store"

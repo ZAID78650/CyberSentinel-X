@@ -162,3 +162,102 @@ def test_seeded_sso_user_has_no_password(db_session):
     assert sso is not None
     assert sso.password_hash == ""
     assert sso.has_password is False
+
+
+def _user_id(client, admin_headers, email):
+    users = client.get("/api/auth/users", headers=admin_headers).json()
+    return next(u["id"] for u in users if u["email"] == email)
+
+
+def test_admin_disables_and_reenables_user(client, admin_headers):
+    uid = str(_user_id(client, admin_headers, "viewer@cybersentinel.io"))
+
+    r = client.post(f"/api/auth/users/{uid}/status", headers=admin_headers, json={"is_active": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["is_active"] is False
+
+    # Disabled account cannot sign in
+    r = client.post("/api/auth/login", json={"email": "viewer@cybersentinel.io", "password": "Viewer@2026"})
+    assert r.status_code == 403
+
+    # Re-enable and it works again
+    r = client.post(f"/api/auth/users/{uid}/status", headers=admin_headers, json={"is_active": True})
+    assert r.status_code == 200
+    r = client.post("/api/auth/login", json={"email": "viewer@cybersentinel.io", "password": "Viewer@2026"})
+    assert r.status_code == 200
+
+
+def test_admin_cannot_disable_self(client, admin_headers):
+    uid = _user_id(client, admin_headers, "admin@cybersentinel.io")
+    r = client.post(f"/api/auth/users/{uid}/status", headers=admin_headers, json={"is_active": False})
+    assert r.status_code == 400
+    assert "own account" in r.json()["detail"]
+
+
+def test_admin_resets_user_password(client, admin_headers):
+    uid = _user_id(client, admin_headers, "viewer@cybersentinel.io")
+    r = client.post(f"/api/auth/users/{uid}/password", headers=admin_headers,
+                    json={"new_password": "Forced@456"})
+    assert r.status_code == 200, r.text
+    assert r.json()["has_password"] is True
+
+    old = client.post("/api/auth/login", json={"email": "viewer@cybersentinel.io", "password": "Viewer@2026"})
+    assert old.status_code == 401
+    new = client.post("/api/auth/login", json={"email": "viewer@cybersentinel.io", "password": "Forced@456"})
+    assert new.status_code == 200
+
+    # Restore the seeded password so later tests keep working
+    client.post(f"/api/auth/users/{uid}/password", headers=admin_headers,
+                json={"new_password": "Viewer@2026"})
+
+
+def test_admin_updates_roles(client, admin_headers):
+    uid = _user_id(client, admin_headers, "viewer@cybersentinel.io")
+    r = client.put(f"/api/auth/users/{uid}/roles", headers=admin_headers,
+                   json={"roles": ["SECURITY_ANALYST", "VIEWER"]})
+    assert r.status_code == 200, r.text
+    assert set(r.json()["roles"]) == {"SECURITY_ANALYST", "VIEWER"}
+
+    # Restore
+    client.put(f"/api/auth/users/{uid}/roles", headers=admin_headers, json={"roles": ["VIEWER"]})
+
+
+def test_admin_cannot_demote_self(client, admin_headers):
+    uid = _user_id(client, admin_headers, "admin@cybersentinel.io")
+    r = client.put(f"/api/auth/users/{uid}/roles", headers=admin_headers,
+                   json={"roles": ["SECURITY_ANALYST"]})
+    assert r.status_code == 400
+    assert "own ADMIN" in r.json()["detail"]
+
+
+def test_admin_rejects_unknown_role(client, admin_headers):
+    uid = _user_id(client, admin_headers, "viewer@cybersentinel.io")
+    r = client.put(f"/api/auth/users/{uid}/roles", headers=admin_headers,
+                   json={"roles": ["SUPERUSER"]})
+    assert r.status_code == 400
+    assert "Unknown roles" in r.json()["detail"]
+
+
+def test_analyst_cannot_use_admin_user_endpoints(client, analyst_headers):
+    # The user list itself is admin-only
+    r = client.get("/api/auth/users", headers=analyst_headers)
+    assert r.status_code == 403
+    # Need a valid user id: use the analyst's own id from /me
+    me = client.get("/api/auth/me", headers=analyst_headers).json()
+    uid = me["id"]
+    for method, path in [
+        ("post", f"/api/auth/users/{uid}/status"),
+        ("post", f"/api/auth/users/{uid}/password"),
+        ("put", f"/api/auth/users/{uid}/roles"),
+    ]:
+        r = getattr(client, method)(path, headers=analyst_headers,
+                                    json={"is_active": True} if "status" in path
+                                    else ({"new_password": "Xyz@12345"} if "password" in path
+                                          else {"roles": ["VIEWER"]}))
+        assert r.status_code == 403, (method, path, r.text)
+
+
+def test_admin_endpoint_unknown_user_404(client, admin_headers):
+    import uuid as _uuid
+    r = client.post(f"/api/auth/users/{_uuid.uuid4()}/status", headers=admin_headers, json={"is_active": False})
+    assert r.status_code == 404

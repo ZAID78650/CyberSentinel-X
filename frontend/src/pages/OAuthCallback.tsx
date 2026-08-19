@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, ShieldCheck } from "lucide-react";
-import { completeOAuth } from "../services/api";
+import { completeOAuth, api, tokenStore } from "../services/api";
 
 function readParams(): { access: string | null; refresh: string | null; linked: string | null } {
   // Tokens arrive in the URL fragment (#access=...&refresh=...) so they never
@@ -29,7 +29,14 @@ export default function OAuthCallback() {
       completeOAuth(access, refresh);
       // Strip the credentials from the URL now that they are stored.
       window.history.replaceState({}, document.title, "/oauth/callback");
-      navigate("/dashboard", { replace: true });
+      
+      // Fetch the user profile directly to ensure it succeeds before navigating.
+      api.get("/auth/me").then((res) => {
+        tokenStore.setUser(res.data);
+        window.location.href = "/dashboard";
+      }).catch(() => {
+        navigate("/login?error=profile_fetch_failed", { replace: true });
+      });
     } else {
       navigate("/login", { replace: true });
     }

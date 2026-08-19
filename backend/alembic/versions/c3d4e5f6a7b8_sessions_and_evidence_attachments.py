@@ -18,13 +18,22 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _col_exists(table: str, col: str) -> bool:
+    cols = [c['name'] for c in sa.inspect(op.get_bind()).get_columns(table)]
+    return col in cols
+
+
 def upgrade() -> None:
     with op.batch_alter_table('devices') as batch_op:
-        batch_op.add_column(sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True))
+        if not _col_exists('devices', 'revoked_at'):
+            batch_op.add_column(sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True))
     with op.batch_alter_table('evidence_records') as batch_op:
-        batch_op.add_column(sa.Column('attachment_name', sa.String(length=255), nullable=True))
-        batch_op.add_column(sa.Column('attachment_path', sa.String(length=512), nullable=True))
-        batch_op.add_column(sa.Column('attachment_hash', sa.String(length=64), nullable=True))
+        if not _col_exists('evidence_records', 'attachment_name'):
+            batch_op.add_column(sa.Column('attachment_name', sa.String(length=255), nullable=True))
+        if not _col_exists('evidence_records', 'attachment_path'):
+            batch_op.add_column(sa.Column('attachment_path', sa.String(length=512), nullable=True))
+        if not _col_exists('evidence_records', 'attachment_hash'):
+            batch_op.add_column(sa.Column('attachment_hash', sa.String(length=64), nullable=True))
 
 
 def downgrade() -> None:

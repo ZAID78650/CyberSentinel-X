@@ -18,18 +18,23 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _table_exists(name: str) -> bool:
+    return name in sa.inspect(op.get_bind()).get_table_names()
+
+
 def upgrade() -> None:
-    op.create_table(
-        'correlation_settings',
-        sa.Column('category', sa.String(length=64), nullable=False),
-        sa.Column('base_floor', sa.Float(), nullable=False),
-        sa.Column('floor_adjustment', sa.Float(), nullable=False),
-        sa.Column('rationale', sa.Text(), nullable=True),
-        sa.Column('applied_by', sa.String(length=128), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint('category'),
-    )
+    if not _table_exists('correlation_settings'):
+        op.create_table(
+            'correlation_settings',
+            sa.Column('category', sa.String(length=64), nullable=False),
+            sa.Column('base_floor', sa.Float(), nullable=False),
+            sa.Column('floor_adjustment', sa.Float(), nullable=False),
+            sa.Column('rationale', sa.Text(), nullable=True),
+            sa.Column('applied_by', sa.String(length=128), nullable=False),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.PrimaryKeyConstraint('category'),
+        )
 
 
 def downgrade() -> None:

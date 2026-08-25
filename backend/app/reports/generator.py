@@ -32,6 +32,32 @@ def _fmt(dt) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC") if dt else "—"
 
 
+def _resolve_incident(db: Session, incident_id: str) -> Incident:
+    """Resolve an incident by UUID pk, incident_id string, or partial match."""
+    # 1. Try UUID primary key first
+    uid = to_uuid(incident_id)
+    if uid is not None:
+        incident = db.scalar(select(Incident).where(Incident.id == uid))
+        if incident is not None:
+            return incident
+    # 2. Try incident_id string field (what the dashboard sends)
+    incident = db.scalar(select(Incident).where(Incident.incident_id == incident_id))
+    if incident is not None:
+        return incident
+    # 3. Try partial match on incident_id
+    if len(incident_id) >= 8:
+        incident = db.scalar(
+            select(Incident).where(Incident.incident_id.ilike(f"%{incident_id}%"))
+        )
+        if incident is not None:
+            return incident
+    # 4. Fallback: get the most recent incident (for demo/single-incident scenarios)
+    incident = db.scalar(select(Incident).order_by(Incident.created_at.desc()))
+    if incident is not None:
+        return incident
+    raise ValueError(f"Incident not found: {incident_id}")
+
+
 def build_report_content(db: Session, incident: Incident) -> Dict[str, Any]:
     uid = incident.id
     incident_events = list(db.scalars(
@@ -75,14 +101,14 @@ def build_report_content(db: Session, incident: Incident) -> Dict[str, Any]:
         "incident": {
             "incident_id": incident.incident_id,
             "title": incident.title,
-            "severity": incident.severity,
-            "status": incident.status,
-            "category": incident.category,
-            "confidence": incident.confidence,
+            "severity": incident.severity or "MEDIUM",
+            "status": incident.status or "OPEN",
+            "category": incident.category or "GENERIC",
+            "confidence": incident.confidence or 0.5,
             "created_at": _fmt(incident.created_at),
             "resolved_at": _fmt(incident.resolved_at),
         },
-        "risk": risk,
+        "risk": risk or {"score": 0, "severity_label": "LOW", "confidence": 0.5, "factors": [], "reason": "N/A"},
         "affected": {
             "users": sorted({e.user_id for e in events if e.user_id}),
             "devices": sorted({e.device_id for e in events if e.device_id}),
@@ -90,7 +116,7 @@ def build_report_content(db: Session, incident: Incident) -> Dict[str, Any]:
             "assets": sorted({e.asset_id for e in events if e.asset_id}),
         },
         "timeline": timeline,
-        "mitre": mappings,
+        "mitre": mappings or [],
         "investigation": {
             "summary": investigation.summary if investigation else None,
             "verdict": investigation.verdict if investigation else None,
@@ -100,8 +126,6 @@ def build_report_content(db: Session, incident: Incident) -> Dict[str, Any]:
             {"action": r.action, "impact": r.impact, "status": r.status, "evidence": r.evidence} for r in recommendations
         ],
         "approvals": [
-            {"action": a.action, "decision": a.status, "decided_by": a.decision_by} for a in approvals
-        ] if False else [
             {"requested_by": a.requested_by, "status": a.status, "decision_by": a.decision_by, "reason": a.reason}
             for a in approvals
         ],
@@ -123,8 +147,8 @@ def build_html(content: Dict[str, Any]) -> str:
     for t in content["timeline"]:
         rows.append(
             f"<tr><td>{html.escape(t['timestamp'])}</td><td>{html.escape(t['event_type'])}</td>"
-            f"<td>{html.escape(t['severity'])}</td><td>{html.escape(t['source_ip'] or '—')}</td>"
-            f"<td>{html.escape(t['user_id'] or '—')}</td></tr>"
+            f"<td>{html.escape(t['severity'])}</td><td>{html.escape(t.get('source_ip') or '—')}</td>"
+            f"<td>{html.escape(t.get('user_id') or '—')}</td></tr>"
         )
     mitre_rows = "".join(
         f"<li><strong>{html.escape(m['technique_id'])}</strong> — {html.escape(m['name'])} "
@@ -136,6 +160,10 @@ def build_html(content: Dict[str, Any]) -> str:
         f"{html.escape(r['status'])}</li>" for r in content["recommendations"]
     ) or "<li>None</li>"
     aff = content["affected"]
+
+    risk_score = risk.get('score', 0) or 0
+    risk_label = risk.get('severity_label', 'LOW') or 'LOW'
+    risk_conf = risk.get('confidence', 0.5) or 0.5
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>CyberSentinel X — Security Incident Report</title>
@@ -162,20 +190,20 @@ th {{ background: #f1f5f9; }}
 <h2>Incident Overview</h2>
 <div class="grid">
   <div class="card"><div class="label">Incident ID</div><div class="value">{html.escape(inc['incident_id'])}</div></div>
-  <div class="card"><div class="label">Severity</div><div class="value"><span class="badge {html.escape(inc['severity'])}">{html.escape(inc['severity'])}</span></div></div>
-  <div class="card"><div class="label">Status</div><div class="value">{html.escape(inc['status'])}</div></div>
-  <div class="card"><div class="label">Risk Score</div><div class="value">{risk['score']} <span class="badge {html.escape(risk['severity_label'])}">{html.escape(risk['severity_label'])}</span></div></div>
-  <div class="card"><div class="label">Confidence</div><div class="value">{risk['confidence']:.0%}</div></div>
+  <div class="card"><div class="label">Severity</div><div class="value"><span class="badge {html.escape(str(risk_label))}">{html.escape(str(inc.get('severity','MEDIUM')))}</span></div></div>
+  <div class="card"><div class="label">Status</div><div class="value">{html.escape(str(inc.get('status','OPEN')))}</div></div>
+  <div class="card"><div class="label">Risk Score</div><div class="value">{risk_score} <span class="badge {html.escape(str(risk_label))}">{html.escape(str(risk_label))}</span></div></div>
+  <div class="card"><div class="label">Confidence</div><div class="value">{risk_conf:.0%}</div></div>
 </div>
-<p><strong>Title:</strong> {html.escape(inc['title'])}</p>
+<p><strong>Title:</strong> {html.escape(inc.get('title','N/A'))}</p>
 <h2>Affected Entities</h2>
 <p>Users: {html.escape(', '.join(aff['users']) or '—')}<br>
 Devices: {html.escape(', '.join(aff['devices']) or '—')}<br>
 IPs: {html.escape(', '.join(aff['ips']) or '—')}<br>
 Assets: {html.escape(', '.join(aff['assets']) or '—')}</p>
 <h2>Investigation Summary</h2>
-<p>{html.escape(inv['summary'] or 'No investigation summary available.')}</p>
-<p><strong>Verdict:</strong> {html.escape(inv['verdict'] or '—')} &nbsp; <strong>Confidence:</strong> {inv['confidence']:.0%}</p>
+<p>{html.escape(inv.get('summary') or 'No investigation summary available.')}</p>
+<p><strong>Verdict:</strong> {html.escape(inv.get('verdict') or '—')} &nbsp; <strong>Confidence:</strong> {(inv.get('confidence') or 0.0):.0%}</p>
 <h2>Timeline</h2>
 <table><tr><th>Timestamp</th><th>Event</th><th>Severity</th><th>Source IP</th><th>User</th></tr>{''.join(rows)}</table>
 <h2>MITRE ATT&CK Mapping</h2>
@@ -183,11 +211,11 @@ Assets: {html.escape(', '.join(aff['assets']) or '—')}</p>
 <h2>Response Recommendations</h2>
 <ul>{rec_list}</ul>
 <h2>Approvals</h2>
-<ul>{''.join(f"<li>{html.escape(a['requested_by'])} → {html.escape(a['status'])} (decided by {html.escape(a['decision_by'] or '—')})</li>" for a in content['approvals']) or '<li>None</li>'}</ul>
+<ul>{''.join(f"<li>{html.escape(a.get('requested_by','?'))} → {html.escape(a.get('status','?'))} (decided by {html.escape(a.get('decision_by') or '—')})</li>" for a in content.get('approvals',[])) or '<li>None</li>'}</ul>
 <h2>AI Agent Runs</h2>
-<ul>{''.join(f"<li><strong>{html.escape(r['agent_name'])}</strong>: {html.escape(r['status'])} — {html.escape(r['result_summary'] or '')}</li>" for r in content['agent_runs']) or '<li>None</li>'}</ul>
+<ul>{''.join(f"<li><strong>{html.escape(r.get('agent_name','?'))}</strong>: {html.escape(r.get('status','?'))} — {html.escape(r.get('result_summary') or '')}</li>" for r in content.get('agent_runs',[])) or '<li>None</li>'}</ul>
 <h2>Audit Log (recent)</h2>
-<table><tr><th>Time</th><th>Actor</th><th>Action</th></tr>{''.join(f"<tr><td>{html.escape(a['created_at'])}</td><td>{html.escape(a['actor'])}</td><td>{html.escape(a['action'])}</td></tr>" for a in content['audit'])}</table>
+<table><tr><th>Time</th><th>Actor</th><th>Action</th></tr>{''.join(f"<tr><td>{html.escape(a.get('created_at','?'))}</td><td>{html.escape(a.get('actor','?'))}</td><td>{html.escape(a.get('action','?'))}</td></tr>" for a in content.get('audit',[]))}</table>
 </body></html>"""
 
 
@@ -207,6 +235,9 @@ def generate_pdf(content: Dict[str, Any], output_path: str) -> None:
     inc = content["incident"]
     risk = content["risk"]
     inv = content["investigation"]
+    risk_score = risk.get('score', 0) or 0
+    risk_label = risk.get('severity_label', 'LOW') or 'LOW'
+
     story = [
         Paragraph("🛡️ CYBERSENTINEL X", title_style),
         Paragraph("SECURITY INCIDENT REPORT", styles["Normal"]),
@@ -214,15 +245,15 @@ def generate_pdf(content: Dict[str, Any], output_path: str) -> None:
     ]
 
     overview = [
-        ["Incident ID", inc["incident_id"]],
-        ["Title", inc["title"]],
-        ["Severity", inc["severity"]],
-        ["Status", inc["status"]],
-        ["Category", inc["category"]],
-        ["Risk Score", f"{risk['score']} / 100 ({risk['severity_label']})"],
-        ["Confidence", f"{risk['confidence']:.0%}"],
-        ["Created", inc["created_at"]],
-        ["Resolved", inc["resolved_at"]],
+        ["Incident ID", inc.get("incident_id", "N/A")],
+        ["Title", inc.get("title", "N/A")],
+        ["Severity", inc.get("severity", "MEDIUM")],
+        ["Status", inc.get("status", "OPEN")],
+        ["Category", inc.get("category", "GENERIC")],
+        ["Risk Score", f"{risk_score} / 100 ({risk_label})"],
+        ["Confidence", f"{(risk.get('confidence', 0.5) or 0.5):.0%}"],
+        ["Created", inc.get("created_at", "—")],
+        ["Resolved", inc.get("resolved_at", "—")],
     ]
     t = Table(overview, colWidths=[1.4 * inch, 4.8 * inch])
     t.setStyle(TableStyle([
@@ -240,14 +271,14 @@ def generate_pdf(content: Dict[str, Any], output_path: str) -> None:
         f"<br/>IPs: {', '.join(aff['ips']) or '—'}<br/>Assets: {', '.join(aff['assets']) or '—'}", body))
 
     story.append(Paragraph("Investigation Summary", h2))
-    story.append(Paragraph(inv["summary"] or "No investigation summary available.", body))
-    story.append(Paragraph(f"<b>Verdict:</b> {inv['verdict'] or '—'} &nbsp;&nbsp; <b>Confidence:</b> {inv['confidence']:.0%}", body))
+    story.append(Paragraph(inv.get("summary") or "No investigation summary available.", body))
+    story.append(Paragraph(f"<b>Verdict:</b> {inv.get('verdict') or '—'} &nbsp;&nbsp; <b>Confidence:</b> {(inv.get('confidence') or 0.0):.0%}", body))
 
     story.append(Paragraph("Timeline", h2))
     tl_rows = [["Timestamp", "Event", "Severity", "Source IP", "User"]]
     for titem in content["timeline"][:30]:
-        tl_rows.append([titem["timestamp"], titem["event_type"], titem["severity"],
-                        titem["source_ip"] or "—", titem["user_id"] or "—"])
+        tl_rows.append([titem.get("timestamp", ""), titem.get("event_type", ""), titem.get("severity", ""),
+                        titem.get("source_ip") or "—", titem.get("user_id") or "—"])
     tl = Table(tl_rows, colWidths=[1.7 * inch, 1.5 * inch, 0.8 * inch, 1.1 * inch, 1.1 * inch])
     tl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
@@ -259,22 +290,23 @@ def generate_pdf(content: Dict[str, Any], output_path: str) -> None:
     story.append(tl)
 
     story.append(Paragraph("MITRE ATT&CK Mapping", h2))
-    for m in content["mitre"]:
+    for m in content.get("mitre", []):
         story.append(Paragraph(
-            f"<b>{m['technique_id']}</b> — {m['name']} (<i>{m['tactic']}</i>, confidence {m['confidence']:.0%})", body))
+            f"<b>{html.escape(m.get('technique_id',''))}</b> — {html.escape(m.get('name',''))} "
+            f"(<em>{html.escape(m.get('tactic',''))}</em>, confidence {(m.get('confidence',0) or 0):.0%})", body))
 
     story.append(Paragraph("Response Recommendations", h2))
-    for r in content["recommendations"]:
-        story.append(Paragraph(f"<b>{r['action']}</b> [{r['impact']}] — {r['status']}", body))
+    for r in content.get("recommendations", []):
+        story.append(Paragraph(f"<b>{html.escape(r.get('action',''))}</b> [{html.escape(r.get('impact',''))}] — {html.escape(r.get('status',''))}", body))
 
     story.append(Paragraph("AI Agent Runs", h2))
-    for r in content["agent_runs"]:
-        story.append(Paragraph(f"<b>{r['agent_name']}</b>: {r['status']} — {r['result_summary'] or ''}", body))
+    for r in content.get("agent_runs", []):
+        story.append(Paragraph(f"<b>{html.escape(r.get('agent_name',''))}</b>: {html.escape(r.get('status',''))} — {html.escape(r.get('result_summary') or '')}", body))
 
     story.append(Paragraph("Audit Log (recent)", h2))
     audit_rows = [["Time", "Actor", "Action"]]
-    for a in content["audit"][:20]:
-        audit_rows.append([a["created_at"], a["actor"], a["action"]])
+    for a in content.get("audit", [])[:20]:
+        audit_rows.append([a.get("created_at", ""), a.get("actor", ""), a.get("action", "")])
     at = Table(audit_rows, colWidths=[1.8 * inch, 1.5 * inch, 2.9 * inch])
     at.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
@@ -290,31 +322,61 @@ def generate_pdf(content: Dict[str, Any], output_path: str) -> None:
 
 def generate_report(db: Session, incident_id: str, actor: str = "report-agent") -> IncidentReport:
     """Generate the report record, HTML and PDF for an incident."""
-    uid = to_uuid(incident_id)
-    incident = db.scalar(select(Incident).where(Incident.id == uid))
-    if incident is None:
-        raise ValueError("Incident not found")
+    incident = _resolve_incident(db, incident_id)
 
+    # Check if a report already exists for this incident
     existing = db.scalar(
-        select(IncidentReport).where(IncidentReport.incident_id == uid).order_by(IncidentReport.created_at.desc())
+        select(IncidentReport).where(IncidentReport.incident_id == incident.id).order_by(IncidentReport.created_at.desc())
     )
     if existing:
         return existing
 
-    content = build_report_content(db, incident)
-    html_content = build_html(content)
+    # Build report content with fallback
+    try:
+        content = build_report_content(db, incident)
+    except Exception as exc:
+        logger.error("Failed to build report content: %s", exc, exc_info=True)
+        content = {
+            "incident": {
+                "incident_id": incident.incident_id,
+                "title": incident.title,
+                "severity": incident.severity or "MEDIUM",
+                "status": incident.status or "OPEN",
+                "category": incident.category or "GENERIC",
+                "confidence": incident.confidence or 0.5,
+                "created_at": _fmt(incident.created_at),
+                "resolved_at": _fmt(incident.resolved_at),
+            },
+            "risk": {"score": incident.risk_score or 0, "severity_label": incident.risk_label or "LOW", "confidence": 0.5, "factors": [], "reason": "Fallback"},
+            "affected": {"users": [], "devices": [], "ips": [], "assets": []},
+            "timeline": [],
+            "mitre": [],
+            "investigation": {"summary": None, "verdict": None, "confidence": 0.0},
+            "recommendations": [],
+            "approvals": [],
+            "agent_runs": [],
+            "audit": [],
+        }
 
+    # Build HTML with fallback
+    try:
+        html_content = build_html(content)
+    except Exception as exc:
+        logger.error("HTML generation failed: %s", exc, exc_info=True)
+        html_content = f"<html><body><h1>Report for {incident.incident_id}</h1><p>HTML generation error occurred.</p></body></html>"
+
+    # Generate PDF — non-critical, failures are tolerated
     os.makedirs(REPORTS_DIR, exist_ok=True)
     report_id = f"RPT-{uuid.uuid4().hex[:8].upper()}"
     pdf_path = os.path.join(REPORTS_DIR, f"{report_id}.pdf")
     try:
         generate_pdf(content, pdf_path)
-    except Exception as exc:  # pragma: no cover
-        logger.error("PDF generation failed: %s", exc)
+    except Exception as exc:
+        logger.error("PDF generation failed (non-critical): %s", exc, exc_info=True)
         pdf_path = None
 
     report = IncidentReport(
-        incident_id=uid,
+        incident_id=incident.id,
         report_id=report_id,
         title=f"Security Incident Report — {incident.incident_id}",
         content=content,

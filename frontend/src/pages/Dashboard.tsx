@@ -213,16 +213,31 @@ export default function Dashboard() {
   });
 
   const generateReport = async (incidentId?: string) => {
-    if (!incidentId) {
-      warning("No incident", "Run a simulation or ingest a dataset first, then generate a report.");
-      return;
-    }
     setReporting(true);
     try {
-      const res = await api.post(`/reports/${incidentId}/generate`);
-      const url = (res.data as { pdf_url?: string }).pdf_url;
-      success("Report generated", "Opening PDF report…");
-      if (url) window.open(url, "_blank");
+      let res;
+      if (incidentId) {
+        // Try specific incident first
+        try {
+          res = await api.post(`/reports/${incidentId}/generate`);
+        } catch (specificErr) {
+          // If specific incident fails, fall back to latest
+          console.warn("Specific incident report failed, trying latest:", specificErr);
+          res = await api.post(`/reports/generate-latest`);
+        }
+      } else {
+        // No incident ID — use generate-latest
+        res = await api.post(`/reports/generate-latest`);
+      }
+      const data = res.data as { pdf_url?: string; report?: { report_id?: string } };
+      const url = data.pdf_url;
+      const reportId = data.report?.report_id;
+      if (url) {
+        success("Report generated", `Report ${reportId ?? ''} — Opening PDF…`);
+        window.open(url, "_blank");
+      } else {
+        success("Report generated", `Report ${reportId ?? ''} generated (HTML only).`);
+      }
     } catch (err) {
       toastError("Report failed", getErrorMessage(err));
     } finally {

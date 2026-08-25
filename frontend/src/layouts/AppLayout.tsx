@@ -14,8 +14,6 @@ import {
   ClipboardList,
   Cpu,
   Crosshair,
-  Gavel,
-  Globe,
   Database,
   Dna,
   FileText,
@@ -27,18 +25,20 @@ import {
   LogOut,
   Map,
   Menu,
+  Microscope,
   Radar,
   Search,
   Server,
   Settings,
+  Shield,
   ShieldCheck,
   ShieldHalf,
   Target,
   TrendingUp,
   UserCog,
   Users,
-  X,
   Zap,
+  Workflow,
 } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../contexts/AuthContext";
@@ -56,78 +56,51 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: strin
     ],
   },
   {
-    label: "Overview",
+    label: "ML & Analytics",
     items: [
-      { to: "/live-events", label: "Live Events", icon: <Activity className="h-4 w-4" /> },
-      { to: "/data-sources", label: "Data Sources", icon: <Database className="h-4 w-4" /> },
-      { to: "/judge-mode", label: "Judge Mode", icon: <Gavel className="h-4 w-4" /> },
+      { to: "/model-performance", label: "Model Performance", icon: <Microscope className="h-4 w-4" /> },
+      { to: "/what-if", label: "What-If Simulator", icon: <Cpu className="h-4 w-4" /> },
+      { to: "/monitoring", label: "System Monitor", icon: <Activity className="h-4 w-4" /> },
+      { to: "/analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
     ],
   },
   {
-    label: "Security",
+    label: "Threat & Security",
     items: [
+      { to: "/malware-analysis", label: "Cybercrime Scanner", icon: <Bug className="h-4 w-4" /> },
       { to: "/alerts", label: "Alerts", icon: <AlertTriangle className="h-4 w-4" /> },
-      { to: "/incidents", label: "Incidents", icon: <ShieldHalf className="h-4 w-4" /> },
-      { to: "/threat-hunting", label: "Threat Hunting", icon: <Crosshair className="h-4 w-4" /> },
-      { to: "/campaigns", label: "Campaigns", icon: <Users className="h-4 w-4" /> },
-      { to: "/malware-analysis", label: "Malware Analysis", icon: <Bug className="h-4 w-4" /> },
-      { to: "/risk-overview", label: "Risk Overview", icon: <Gauge className="h-4 w-4" /> },
-      { to: "/defense-center", label: "Defense Center", icon: <ShieldCheck className="h-4 w-4" /> },
+      { to: "/threat-intelligence", label: "Threat Intel", icon: <Fingerprint className="h-4 w-4" /> },
+      { to: "/evidence-ledger", label: "Evidence Ledger", icon: <Boxes className="h-4 w-4" /> },
+      { to: "/judge-mode", label: "Judge Mode", icon: <Search className="h-4 w-4" /> },
     ],
   },
   {
-    label: "Investigation",
-    items: [
-      { to: "/search", label: "Global Search", icon: <Search className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "AI Analysis",
+    label: "Investigation & Response",
     items: [
       { to: "/investigation", label: "Investigation Agent", icon: <Radar className="h-4 w-4" /> },
+      { to: "/live-events", label: "Live Events", icon: <AlertTriangle className="h-4 w-4" /> },
+      { to: "/data-sources", label: "Data Sources", icon: <Database className="h-4 w-4" /> },
+      { to: "/response-center", label: "Response Center", icon: <ShieldCheck className="h-4 w-4" /> },
+    ],
+  },
+  {
+    label: "Advanced Modules",
+    items: [
+      { to: "/risk-overview", label: "Risk Overview", icon: <Gauge className="h-4 w-4" /> },
       { to: "/attack-dna", label: "Attack DNA", icon: <Dna className="h-4 w-4" /> },
       { to: "/attack-graph", label: "Attack Graph", icon: <GitBranch className="h-4 w-4" /> },
-      { to: "/threat-intelligence", label: "Threat Intelligence", icon: <Fingerprint className="h-4 w-4" /> },
-      { to: "/threat-analyzer", label: "Threat Analyzer", icon: <Search className="h-4 w-4" /> },
-      { to: "/mitre-matrix", label: "MITRE ATT&CK Matrix", icon: <Target className="h-4 w-4" /> },
+      { to: "/incidents", label: "Incidents", icon: <ShieldHalf className="h-4 w-4" /> },
+      { to: "/campaigns", label: "Campaigns", icon: <Users className="h-4 w-4" /> },
+      { to: "/mitre-matrix", label: "MITRE ATT&CK", icon: <Target className="h-4 w-4" /> },
     ],
   },
   {
-    label: "Forensics & Evidence",
-    items: [
-      { to: "/evidence-ledger", label: "Evidence Ledger", icon: <Boxes className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "Infrastructure",
-    items: [
-      { to: "/assets", label: "Assets", icon: <Database className="h-4 w-4" /> },
-      { to: "/asset-risk", label: "Asset Risk Intelligence", icon: <Server className="h-4 w-4" /> },
-      { to: "/playbooks", label: "Playbooks", icon: <BookOpen className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "Response",
-    items: [
-      { to: "/response-center", label: "Response Center", icon: <ShieldCheck className="h-4 w-4" /> },
-      { to: "/human-approvals", label: "Human Approvals", icon: <ListChecks className="h-4 w-4" /> },
-      { to: "/actions-log", label: "Actions Log", icon: <ClipboardList className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "Resilience",
+    label: "Resilience & Reports",
     items: [
       { to: "/attack-simulator", label: "Attack Simulator", icon: <Zap className="h-4 w-4" /> },
-      { to: "/model-center", label: "Model Center", icon: <Cpu className="h-4 w-4" /> },
-      { to: "/compliance", label: "Compliance Center", icon: <BadgeCheck className="h-4 w-4" /> },
-      { to: "/sbom", label: "SBOM & Supply Chain", icon: <Boxes className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "Reports",
-    items: [
+      { to: "/model-center", label: "Model Center", icon: <Workflow className="h-4 w-4" /> },
+      { to: "/compliance", label: "Compliance", icon: <BadgeCheck className="h-4 w-4" /> },
       { to: "/incident-reports", label: "Incident Reports", icon: <FileText className="h-4 w-4" /> },
-      { to: "/analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
     ],
   },
 ];

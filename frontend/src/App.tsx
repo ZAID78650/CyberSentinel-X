@@ -45,6 +45,9 @@ import GisHeatmap from "./pages/GisHeatmap";
 import PredictiveAlerts from "./pages/PredictiveAlerts";
 import FinancialIntelligence from "./pages/FinancialIntelligence";
 import LeaDashboard from "./pages/LeaDashboard";
+import ModelPerformance from "./pages/ModelPerformance";
+import WhatIfSimulation from "./pages/WhatIfSimulation";
+import SystemMonitor from "./pages/SystemMonitor";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -114,6 +117,9 @@ export default function App() {
         <Route path="/predictive-alerts" element={<PredictiveAlerts />} />
         <Route path="/financial-intelligence" element={<FinancialIntelligence />} />
         <Route path="/lea-dashboard" element={<LeaDashboard />} />
+        <Route path="/model-performance" element={<ModelPerformance />} />
+        <Route path="/what-if" element={<WhatIfSimulation />} />
+        <Route path="/monitoring" element={<SystemMonitor />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

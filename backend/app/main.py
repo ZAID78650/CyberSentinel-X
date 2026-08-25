@@ -37,6 +37,7 @@ from app.api.routes import (
     ueba,
     websocket,
 )
+from app.api.routes import v2
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.logging import setup_logging
@@ -65,6 +66,22 @@ async def lifespan(app: FastAPI):
     from app.api.routes.dataset import auto_detection_loop
 
     auto_detection_task = asyncio.create_task(auto_detection_loop())
+
+    # Pre-train V2 ML models on synthetic data for fast predictions
+    try:
+        from app.api.routes.v2 import _retrain_engine
+        import threading
+        def _train_in_bg():
+            try:
+                result = _retrain_engine()
+                logger.info("V2 ML engine trained: %s", {k: v for k, v in result.items() if isinstance(v, dict)})
+            except Exception as e:
+                logger.error("V2 ML training failed: %s", e)
+        t = threading.Thread(target=_train_in_bg, daemon=True)
+        t.start()
+    except Exception as e:
+        logger.warning("Could not start V2 ML training: %s", e)
+
     yield
     auto_detection_task.cancel()
     logger.info("shutting down %s", settings.app_name)
@@ -137,6 +154,7 @@ app.include_router(ueba.router)
 app.include_router(simulations.router)
 app.include_router(websocket.router)
 app.include_router(financial.router)
+app.include_router(v2.router)
 
 
 @app.get("/", include_in_schema=False)

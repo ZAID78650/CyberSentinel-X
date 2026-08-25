@@ -71,6 +71,7 @@ const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: strin
       { to: "/alerts", label: "Alerts", icon: <AlertTriangle className="h-4 w-4" /> },
       { to: "/threat-intelligence", label: "Threat Intel", icon: <Fingerprint className="h-4 w-4" /> },
       { to: "/evidence-ledger", label: "Evidence Ledger", icon: <Boxes className="h-4 w-4" /> },
+      { to: "/security-settings", label: "Security & 2FA", icon: <ShieldCheck className="h-4 w-4" /> },
       { to: "/judge-mode", label: "Judge Mode", icon: <Search className="h-4 w-4" /> },
     ],
   },

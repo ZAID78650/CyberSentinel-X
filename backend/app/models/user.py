@@ -51,6 +51,10 @@ class User(Base, UUIDMixin, TimestampMixin):
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Blocks SSO sign-in for this account even while password login stays active.
     sso_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Two-factor authentication (TOTP)
+    tfa_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    tfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    tfa_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     roles: Mapped[List[Role]] = relationship(secondary=user_roles, back_populates="users")
     devices: Mapped[List["Device"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -66,6 +70,9 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     def has_role(self, role: str) -> bool:
         return role in self.role_names
+
+    def has_2fa(self) -> bool:
+        return bool(self.tfa_enabled and self.tfa_secret)
 
 
 class Device(Base, UUIDMixin, TimestampMixin):

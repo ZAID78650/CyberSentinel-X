@@ -32,6 +32,7 @@ import IncidentReports from "./pages/IncidentReports";
 import Analytics from "./pages/Analytics";
 import DataSources from "./pages/DataSources";
 import Settings from "./pages/Settings";
+import SecuritySettings from "./pages/SecuritySettings";
 import DefenseCenter from "./pages/DefenseCenter";
 import Assets from "./pages/Assets";
 import Playbooks from "./pages/Playbooks";
@@ -113,6 +114,7 @@ export default function App() {
         <Route path="/entity/:entityType/:value" element={<EntityDetail />} />
         <Route path="/admin/users" element={<AdminUsers />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/security-settings" element={<SecuritySettings />} />
         <Route path="/gis-heatmap" element={<GisHeatmap />} />
         <Route path="/predictive-alerts" element={<PredictiveAlerts />} />
         <Route path="/financial-intelligence" element={<FinancialIntelligence />} />

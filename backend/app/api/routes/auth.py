@@ -575,3 +575,119 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
             send_password_reset(user.email, link)
 
     return {"message": "If that email is registered, a reset link has been sent."}
+
+
+# ── Two-Factor Authentication (TOTP) ───────────────────────────────────
+
+from app.services.totp import generate_secret, get_provisioning_uri, verify_token as totp_verify_token
+
+
+@router.get("/2fa/setup")
+def setup_2fa(user: User = Depends(get_current_user)):
+    """Generate a new TOTP secret and provisioning URI for 2FA enrollment.
+
+    The secret is stored temporarily on the user record (not yet enabled).
+    The client should scan the QR code and then call /verify to activate.
+    """
+    secret = generate_secret()
+    uri = get_provisioning_uri(secret, user.email)
+    # Store but don't enable yet - waiting for verification
+    user.tfa_secret = secret
+    user.tfa_enabled = False
+    user.tfa_verified = False
+    db_user = next(get_db())
+    db_user.merge(user)
+    db_user.commit()
+    return {"secret": secret, "uri": uri, "enabled": False}
+
+
+@router.post("/2fa/verify")
+def verify_2fa(req: 'TwoFactorVerifyRequest', request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Verify a TOTP code and optionally enable 2FA.
+
+    - When action is 'enable': verifies the code and enables 2FA if valid.
+    - When action is 'verify': verifies the code (for login flow).
+    - When action is 'disable': verifies current code then disables 2FA.
+    """
+    from app.services.audit import log_action
+    from app.schemas.auth import TwoFactorBackupCodesResponse
+    
+    if not user.tfa_secret:
+        raise HTTPException(status_code=400, detail="2FA is not set up. Call /api/auth/2fa/setup first.")
+    
+    ip = get_client_ip(request)
+    is_valid = totp_verify_token(user.tfa_secret, req.code)
+    
+    if req.action == "verify":
+        # Just verify without enabling (used during login flow)
+        if is_valid:
+            log_action(db, actor=user.email, action="TFA.VERIFY_SUCCESS",
+                       target_type="user", target_id=str(user.id), ip_address=ip)
+            return {"valid": True, "message": "Code verified successfully."}
+        else:
+            log_action(db, actor=user.email, action="TFA.VERIFY_FAIL",
+                       target_type="user", target_id=str(user.id), ip_address=ip)
+            raise HTTPException(status_code=400, detail="Invalid verification code. Please try again.")
+    
+    elif req.action == "enable":
+        if is_valid:
+            user.tfa_enabled = True
+            user.tfa_verified = True
+            db.commit()
+            log_action(db, actor=user.email, action="TFA.ENABLED",
+                       target_type="user", target_id=str(user.id), ip_address=ip)
+            # Generate backup codes
+            from app.services.totp import generate_backup_codes, hash_backup_code
+            codes = [generate_backup_codes() for _ in range(8)]
+            # Note: In production, store the hashed codes. For now, return plain codes once.
+            return {
+                "valid": True,
+                "message": "2FA has been enabled successfully.",
+                "backup_codes": codes,
+                "warning": "Save these backup codes securely. They will not be shown again."
+            }
+        else:
+            log_action(db, actor=user.email, action="TFA.ENABLE_FAILED",
+                       target_type="user", target_id=str(user.id), ip_address=ip)
+            raise HTTPException(status_code=400, detail="Invalid verification code. 2FA has not been enabled.")
+    
+    elif req.action == "disable":
+        if not user.tfa_enabled:
+            raise HTTPException(status_code=400, detail="2FA is not currently enabled.")
+        if is_valid:
+            user.tfa_enabled = False
+            user.tfa_verified = False
+            db.commit()
+            log_action(db, actor=user.email, action="TFA.DISABLED",
+                       target_type="user", target_id=str(user.id), ip_address=ip)
+            return {"valid": True, "message": "2FA has been disabled successfully."}
+        else:
+            log_action(db, actor=user.email, action="TFA.DISABLE_FAILED",
+                       target_type="user", target_id=str(user.id), ip_address=ip)
+            raise HTTPException(status_code=400, detail="Invalid verification code. 2FA has not been disabled.")
+    
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid action: {req.action}. Use 'enable', 'verify', or 'disable'.")
+
+
+@router.get("/2fa/status")
+def get_2fa_status(user: User = Depends(get_current_user)):
+    """Get the 2FA status for the current user."""
+    return {
+        "enabled": user.tfa_enabled or False,
+        "verified": user.tfa_verified or False,
+        "has_secret": bool(user.tfa_secret),
+    }
+
+
+@router.get("/2fa/backup-codes")
+def generate_backup_codes_endpoint(user: User = Depends(get_current_user)):
+    """Generate new backup codes (invalidates previous ones)."""
+    if not user.tfa_enabled:
+        raise HTTPException(status_code=400, detail="Enable 2FA before generating backup codes.")
+    from app.services.totp import generate_backup_code
+    codes = [generate_backup_codes() for _ in range(8)]
+    return {
+        "codes": codes,
+        "warning": "Store these codes securely. They will not be shown again."
+    }

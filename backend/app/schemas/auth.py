@@ -94,6 +94,7 @@ class UserOut(BaseModel):
     oauth_provider: Optional[str] = None
     has_password: bool = False
     sso_blocked: bool = False
+    two_factor_enabled: bool = False
     created_at: Optional[datetime] = None
     roles: List[str] = []
 
@@ -142,3 +143,18 @@ class UserSsoBlockUpdate(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+
+
+class TwoFactorSetupResponse(BaseModel):
+    secret: str
+    uri: str
+    enabled: bool
+
+
+class TwoFactorVerifyRequest(BaseModel):
+    code: str
+    action: str = 'enable'  # 'enable' or 'disable' or 'verify'
+
+
+class BackupCodeResponse(BaseModel):
+    codes: list[str]

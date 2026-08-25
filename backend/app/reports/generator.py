@@ -44,10 +44,12 @@ def _resolve_incident(db: Session, incident_id: str) -> Incident:
     incident = db.scalar(select(Incident).where(Incident.incident_id == incident_id))
     if incident is not None:
         return incident
-    # 3. Try partial match on incident_id
+    # 3. Try partial match on incident_id (escape SQL wildcards to prevent injection)
     if len(incident_id) >= 8:
+        escaped = incident_id.replace('%', '\\%').replace('_', '\\_')
+        safe_pattern = '%' + escaped + '%'
         incident = db.scalar(
-            select(Incident).where(Incident.incident_id.ilike(f"%{incident_id}%"))
+            select(Incident).where(Incident.incident_id.ilike(safe_pattern))
         )
         if incident is not None:
             return incident

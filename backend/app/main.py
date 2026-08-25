@@ -19,6 +19,7 @@ from app.api.routes import (
     dataset,
     evidence,
     events,
+    financial,
     health,
     incidents,
     investigations,
@@ -135,6 +136,7 @@ app.include_router(campaign_intel.router)
 app.include_router(ueba.router)
 app.include_router(simulations.router)
 app.include_router(websocket.router)
+app.include_router(financial.router)
 
 
 @app.get("/", include_in_schema=False)

@@ -6,8 +6,8 @@ import {
   Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  AlertTriangle, Bot, ChevronRight, FileText as FileTextIcon, Loader2, PlayCircle, Radar,
-  ShieldCheck, ShieldHalf, Siren, Zap,
+  AlertTriangle, Bot, Brain, ChevronRight, DollarSign, FileText as FileTextIcon, Loader2, MapPin, PlayCircle, Radar,
+  ShieldCheck, ShieldHalf, Siren, Target, TrendingUp, Zap,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { useSocket } from "../contexts/WebSocketContext";
@@ -270,8 +270,68 @@ export default function Dashboard() {
     }, {}),
   ).map(([name, value]) => ({ name, value }));
 
+  // ── Financial Crime Intelligence Data ──
+  const { data: finData } = useQuery({
+    queryKey: ["financial-dashboard"],
+    queryFn: async () => (await api.get<any>("/financial/dashboard")).data,
+  });
+  const { data: predData } = useQuery({
+    queryKey: ["predictions"],
+    queryFn: async () => (await api.get<any>("/financial/predictions", { params: { limit: 5 } })).data,
+  });
+
   return (
     <div className="space-y-5">
+      {/* Financial Intelligence Hero Section */}
+      {finData && (
+        <Card
+          title="🏦 CyberSentinel-X — Predictive Financial Cybercrime Intelligence"
+          subtitle="SIH26184: AI-powered withdrawal prediction & proactive intervention"
+          actions={
+            <Link to="/financial-intelligence" className="text-xs font-semibold text-electric-400 hover:underline">
+              Full Intelligence View <ChevronRight className="inline h-3 w-3" />
+            </Link>
+          }
+        >
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Total Complaints</p>
+              <p className="font-mono text-xl font-bold text-electric-400">{finData.summary.total_complaints}</p>
+            </div>
+            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Amount at Risk</p>
+              <p className="font-mono text-xl font-bold text-cyber-red">₹{(finData.summary.total_amount / 100000).toFixed(1)}L</p>
+            </div>
+            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">High Risk Zones</p>
+              <p className="font-mono text-xl font-bold text-cyber-orange">{finData.summary.high_risk_zones} <span className="text-[10px] text-slate-500">/ {finData.summary.total_zones}</span></p>
+            </div>
+            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Active Alerts</p>
+              <p className="font-mono text-xl font-bold text-cyber-purple">{finData.summary.active_alerts}</p>
+            </div>
+          </div>
+          {predData?.alerts && predData.alerts.length > 0 && (
+            <div className="mt-4 rounded-lg border border-cyber-red/30 bg-cyber-red/5 p-3">
+              <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyber-red">
+                <Target className="h-3 w-3" /> Top Predictive Alert
+              </p>
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-xs font-bold text-cyber-red">{predData.alerts[0].alert_id}</span>
+                <span className="text-xs text-slate-200">{predData.alerts[0].predicted_zone}</span>
+                <span className="badge border border-cyber-red/40 bg-cyber-red/10 text-cyber-red text-[9px]">
+                  {(predData.alerts[0].risk_probability * 100).toFixed(0)}% risk
+                </span>
+                <span className="text-[10px] text-slate-500">{predData.alerts[0].crime_pattern}</span>
+                <Link to="/predictive-alerts" className="ml-auto text-[10px] font-semibold text-electric-400 hover:underline">
+                  View All →
+                </Link>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         {data.kpis.map((k) => (

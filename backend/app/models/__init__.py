@@ -35,6 +35,13 @@ from app.models.forensics import (
     EvidenceRecord,
     LedgerBlock,
 )
+from app.models.financial import (
+    FinancialComplaint,
+    FinancialTransaction,
+    FinancialAccount,
+    WithdrawalZone,
+    WithdrawalPrediction,
+)
 
 __all__ = [
     "Base",
@@ -73,4 +80,9 @@ __all__ = [
     "AttackPrediction",
     "AnalystFeedback",
     "CorrelationSetting",
+    "FinancialComplaint",
+    "FinancialTransaction",
+    "FinancialAccount",
+    "WithdrawalZone",
+    "WithdrawalPrediction",
 ]

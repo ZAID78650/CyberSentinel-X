@@ -67,7 +67,7 @@ export function Logo({ size = 36, withText = true }: { size?: number; withText?:
             CYBERSENTINEL
           </span>
           <span className="block text-[10px] font-semibold uppercase tracking-[0.35em] text-cyber-cyan">
-            X · SOC Platform
+            X · Predictive Intelligence
           </span>
         </div>
       )}
@@ -88,7 +88,7 @@ export function HeroLogo({ size = 88 }: { size?: number }) {
           CYBERSENTINEL X
         </p>
         <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.4em] text-slate-500">
-          Agentic AI SOC Platform
+          Predictive Cybercrime Intelligence
         </p>
       </div>
     </div>

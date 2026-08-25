@@ -41,6 +41,10 @@ import SBOM from "./pages/SBOM";
 import ThreatAnalyzer from "./pages/ThreatAnalyzer";
 import EntityDetail from "./pages/EntityDetail";
 import AdminUsers from "./pages/AdminUsers";
+import GisHeatmap from "./pages/GisHeatmap";
+import PredictiveAlerts from "./pages/PredictiveAlerts";
+import FinancialIntelligence from "./pages/FinancialIntelligence";
+import LeaDashboard from "./pages/LeaDashboard";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -106,6 +110,10 @@ export default function App() {
         <Route path="/entity/:entityType/:value" element={<EntityDetail />} />
         <Route path="/admin/users" element={<AdminUsers />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/gis-heatmap" element={<GisHeatmap />} />
+        <Route path="/predictive-alerts" element={<PredictiveAlerts />} />
+        <Route path="/financial-intelligence" element={<FinancialIntelligence />} />
+        <Route path="/lea-dashboard" element={<LeaDashboard />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

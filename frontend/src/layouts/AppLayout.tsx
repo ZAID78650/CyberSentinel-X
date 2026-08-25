@@ -8,11 +8,14 @@ import {
   Bell,
   BookOpen,
   Boxes,
+  Brain,
   Bug,
+  Building2,
   ClipboardList,
   Cpu,
   Crosshair,
   Gavel,
+  Globe,
   Database,
   Dna,
   FileText,
@@ -22,6 +25,7 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Map,
   Menu,
   Radar,
   Search,
@@ -30,6 +34,7 @@ import {
   ShieldCheck,
   ShieldHalf,
   Target,
+  TrendingUp,
   UserCog,
   Users,
   X,
@@ -41,9 +46,18 @@ import { useWebSocket } from "../hooks/useWebSocket";
 
 const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: string; icon: ReactNode }> }> = [
   {
-    label: "Overview",
+    label: "Financial Intelligence",
     items: [
       { to: "/dashboard", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
+      { to: "/financial-intelligence", label: "Financial Intel", icon: <TrendingUp className="h-4 w-4" /> },
+      { to: "/gis-heatmap", label: "GIS Risk Heatmap", icon: <Map className="h-4 w-4" /> },
+      { to: "/predictive-alerts", label: "Predictive Alerts", icon: <Brain className="h-4 w-4" /> },
+      { to: "/lea-dashboard", label: "LEA Dashboard", icon: <Shield className="h-4 w-4" /> },
+    ],
+  },
+  {
+    label: "Overview",
+    items: [
       { to: "/live-events", label: "Live Events", icon: <Activity className="h-4 w-4" /> },
       { to: "/data-sources", label: "Data Sources", icon: <Database className="h-4 w-4" /> },
       { to: "/judge-mode", label: "Judge Mode", icon: <Gavel className="h-4 w-4" /> },
@@ -234,7 +248,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
         <Search className="h-3.5 w-3.5 text-slate-500" />
         <input
           className="w-48 bg-transparent text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none"
-          placeholder="Global search: IP, incident, DNA…"
+          placeholder="Search complaints, zones, alerts…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
@@ -269,7 +283,7 @@ export default function AppLayout() {
           <Outlet />
         </main>
         <footer className="border-t border-night-700/70 px-6 py-3 text-center text-[11px] text-slate-600">
-          CyberSentinel X · Agentic AI-Powered SOC Platform · Smart India Hackathon 2026 Prototype
+          CyberSentinel X · Predictive Financial Cybercrime Intelligence · SIH 2026 (SIH26184)
         </footer>
       </div>
     </div>

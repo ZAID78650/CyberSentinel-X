@@ -365,7 +365,8 @@ def generate_report(db: Session, incident_id: str, actor: str = "report-agent") 
         html_content = build_html(content)
     except Exception as exc:
         logger.error("HTML generation failed: %s", exc, exc_info=True)
-        html_content = f"<html><body><h1>Report for {incident.incident_id}</h1><p>HTML generation error occurred.</p></body></html>"
+        safe_id = html.escape(str(incident.incident_id))
+        html_content = f"<html><body><h1>Report for {safe_id}</h1><p>HTML generation error occurred.</p></body></html>"
 
     # Generate PDF — non-critical, failures are tolerated
     os.makedirs(REPORTS_DIR, exist_ok=True)

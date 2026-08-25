@@ -583,7 +583,7 @@ from app.services.totp import generate_secret, get_provisioning_uri, verify_toke
 
 
 @router.get("/2fa/setup")
-def setup_2fa(user: User = Depends(get_current_user)):
+def setup_2fa(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Generate a new TOTP secret and provisioning URI for 2FA enrollment.
 
     The secret is stored temporarily on the user record (not yet enabled).
@@ -595,9 +595,8 @@ def setup_2fa(user: User = Depends(get_current_user)):
     user.tfa_secret = secret
     user.tfa_enabled = False
     user.tfa_verified = False
-    db_user = next(get_db())
-    db_user.merge(user)
-    db_user.commit()
+    db.merge(user)
+    db.commit()
     return {"secret": secret, "uri": uri, "enabled": False}
 
 
@@ -685,7 +684,7 @@ def generate_backup_codes_endpoint(user: User = Depends(get_current_user)):
     """Generate new backup codes (invalidates previous ones)."""
     if not user.tfa_enabled:
         raise HTTPException(status_code=400, detail="Enable 2FA before generating backup codes.")
-    from app.services.totp import generate_backup_code
+    from app.services.totp import generate_backup_codes
     codes = [generate_backup_codes() for _ in range(8)]
     return {
         "codes": codes,

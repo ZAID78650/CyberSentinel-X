@@ -1,6 +1,6 @@
 # CyberSentinel X — nginx reverse proxy
-# Only ${BACKEND_URL} is substituted at container start by envsubst.
-# All nginx variables are escaped as $${...} to survive envsubst.
+# ${BACKEND_URL} is substituted at container start by the entrypoint.
+# All nginx variables ($uri, $proxy_host, etc.) are safe.
 
 server {
     listen 80;

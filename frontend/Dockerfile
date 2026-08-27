@@ -31,14 +31,16 @@ ENV BACKEND_URL=$BACKEND_URL
 
 # Copy built application
 COPY --from=builder /app/dist /usr/share/nginx/html
-# Template gets envsubst'd into /etc/nginx/conf.d/default.conf by the image
-# entrypoint (needs root to write the generated config; the nginx master then
-# drops to its `user nginx;` workers as configured in the base image).
-COPY frontend/nginx.conf /etc/nginx/templates/default.conf.template
+# Copy the nginx template and substitute ONLY $BACKEND_URL at startup.
+# We do NOT use the default /etc/nginx/templates/ mechanism because
+# envsubst there replaces ALL ${...} patterns, clobbering nginx variables
+# like $proxy_host and $remote_addr. Instead we run envsubst with an
+# explicit variable list in the entrypoint.
+COPY frontend/nginx.conf.template /etc/nginx/nginx.conf.template
 
 EXPOSE 80
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -q -O - http://localhost/ || exit 1
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD /bin/sh -c 'envsubst "$$BACKEND_URL" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf && nginx -g "daemon off;"'

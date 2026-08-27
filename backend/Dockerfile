@@ -63,7 +63,7 @@ ENV DATASET_UPLOAD_DIR=/app/data/uploads
 # Create data directories and set permissions
 RUN mkdir -p /app/data/uploads && \
     chmod +x /docker-entrypoint.sh && \
-    chmod +x /app/scripts/*.py 2>/dev/null || true && \
+    (chmod +x /app/scripts/*.py 2>/dev/null || true) && \
     chown -R appuser:appuser /app
 
 USER appuser

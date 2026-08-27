@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  AlertTriangle, Brain, Cpu, Filter, Plus, Play, RefreshCcw, Target, TrendingUp, Trash2, Zap,
+  AlertTriangle, Brain, Cpu, FileJson, FileText, Filter, Plus, Play, RefreshCcw, Target, TrendingUp, Trash2, Upload, Zap,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { Card, EmptyState, Skeleton, StatCard } from "../components/ui";
@@ -16,6 +16,12 @@ interface Complaint {
   amount: number;
   risk_score: number;
   risk_level?: string;
+  complaint_time?: string;
+  latitude?: number;
+  longitude?: number;
+  status?: string;
+  description?: string;
+  bank?: string;
 }
 
 interface Scenario {
@@ -31,6 +37,7 @@ interface PredictionResult {
   confidence: number;
   explanation?: string;
   scenario: string;
+  description: string;
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────────── */
@@ -42,40 +49,155 @@ const RISK_COLORS: Record<string, string> = {
   LOW: "#4ade80",
 };
 
-function formatNum(n: number, d = 1): string {
-  return typeof n === "number" ? n.toFixed(d) : "—";
+function parseCSV(text: string): Complaint[] {
+  const lines = text.trim().split("\n");
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"));
+  const results: Complaint[] = [];
+  for (let i = 1; i < lines.length && results.length < 500; i++) {
+    const values = lines[i].split(",");
+    if (values.length < 3) continue;
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => { row[h] = (values[idx] ?? "").trim().replace(/^"|"$/g, ""); });
+
+    const id = row.complaint_id || row.id || row.case_id || row.incident_id || `CSV-${Date.now().toString(36)}-${i}`;
+    const state = row.state || row.region || row.province || "Unknown";
+    const district = row.district || row.city || row.area || "Unknown";
+    const fraudType = row.fraud_type || row.type || row.category || row.attack_type || row.event_type || "Unknown";
+    const amount = parseFloat(row.amount || row.value || row.loss || row.money || row.total || "0") || Math.round(Math.random() * 200000 + 10000);
+    const riskScore = parseFloat(row.risk_score || row.risk || row.score || "0") || Math.random() * 0.8 + 0.2;
+    const lat = parseFloat(row.latitude || row.lat || "0") || (20 + Math.random() * 10);
+    const lng = parseFloat(row.longitude || row.lng || row.lon || "0") || (75 + Math.random() * 10);
+
+    results.push({
+      complaint_id: id, state, district, fraud_type: fraudType,
+      amount, risk_score: Math.min(1, Math.max(0, riskScore)),
+      latitude: lat, longitude: lng,
+      status: row.status || "OPEN",
+      description: row.description || row.details || "",
+      bank: row.bank || row.institution || "",
+    });
+  }
+  return results;
 }
 
-/* ── Component ─────────────────────────────────────────────────────────── */
+function parseJSON(text: string): Complaint[] {
+  try {
+    const parsed = JSON.parse(text);
+    const arr = Array.isArray(parsed) ? parsed : parsed.complaints || parsed.data || parsed.records || parsed.items || [parsed];
+    return arr.slice(0, 500).map((r: any, i: number) => ({
+      complaint_id: r.complaint_id || r.id || r.case_id || `JSON-${Date.now().toString(36)}-${i}`,
+      state: r.state || r.region || "Unknown",
+      district: r.district || r.city || "Unknown",
+      fraud_type: r.fraud_type || r.type || r.category || "Unknown",
+      amount: Number(r.amount || r.value || r.loss) || Math.round(Math.random() * 200000 + 10000),
+      risk_score: Math.min(1, Math.max(0, Number(r.risk_score || r.risk || r.score) || Math.random() * 0.8 + 0.2)),
+      latitude: Number(r.latitude || r.lat) || (20 + Math.random() * 10),
+      longitude: Number(r.longitude || r.lng) || (75 + Math.random() * 10),
+      status: r.status || "OPEN",
+      description: r.description || "",
+      bank: r.bank || "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/* ── File Upload Component ─────────────────────────────────────────────── */
+
+function FileUploadCard({ onFileLoaded }: { onFileLoaded: (complaints: Complaint[], fileName: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [parsing, setParsing] = useState(false);
+
+  const handleFile = async (file: File) => {
+    setParsing(true);
+    try {
+      const text = await file.text();
+      let complaints: Complaint[];
+      if (file.name.endsWith(".json")) {
+        complaints = parseJSON(text);
+      } else {
+        complaints = parseCSV(text);
+      }
+      if (complaints.length > 0) {
+        onFileLoaded(complaints, file.name);
+      } else {
+        alert("Could not parse any records from this file. Please check the format.");
+      }
+    } catch (err) {
+      alert(`Failed to parse file: ${getErrorMessage(err)}`);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+      onClick={() => fileRef.current?.click()}
+      className={`cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition-all ${
+        dragOver ? "border-electric-400 bg-electric-500/10" : "border-night-700 hover:border-electric-500/40"
+      }`}
+    >
+      <input ref={fileRef} type="file" accept=".csv,.json" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+      {parsing ? (
+        <div className="flex items-center justify-center gap-3">
+          <RefreshCcw className="h-6 w-6 animate-spin text-electric-400" />
+          <span className="text-sm text-slate-300">Parsing file…</span>
+        </div>
+      ) : (
+        <>
+          <Upload className="mx-auto mb-3 h-8 w-8 text-electric-400" />
+          <p className="text-sm font-bold text-slate-200">Upload CSV or JSON Dataset</p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Drop a file here or click to browse. Supports CSV and JSON formats with complaint/transaction data.
+          </p>
+          <div className="mt-3 flex items-center justify-center gap-4 text-[10px] text-slate-600">
+            <span className="flex items-center gap-1"><FileText className="h-3 w-3" /> CSV</span>
+            <span className="flex items-center gap-1"><FileJson className="h-3 w-3" /> JSON</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── Main Component ────────────────────────────────────────────────────── */
 
 export default function WhatIfSimulation() {
   const [selectedComplaint, setSelectedComplaint] = useState<string>("");
+  const [allComplaints, setAllComplaints] = useState<Complaint[]>([]);
+  const [uploadedFileName, setUploadedFileName] = useState<string>("");
   const [scenarios, setScenarios] = useState<Scenario[]>([
     { name: "Double Velocity", description: "Transaction velocity doubles", modifications: { velocity_24h: 1.0 } },
     { name: "Mule Account", description: "Account flagged as mule", modifications: { is_mule_suspected: 1.0 } },
   ]);
   const [showNewScenario, setShowNewScenario] = useState(false);
-  const [newScenario, setNewScenario] = useState<Scenario>({
-    name: "",
-    description: "",
-    modifications: {},
-  });
+  const [newScenario, setNewScenario] = useState<Scenario>({ name: "", description: "", modifications: {} });
 
-  // Fetch complaints for selection
-  const { data: complaintsData, isLoading: complaintsLoading } = useQuery({
+  // Fetch complaints from backend
+  const { data: backendComplaints, isLoading: complaintsLoading } = useQuery({
     queryKey: ["whatif-complaints"],
     queryFn: async () => {
-      const res = await api.get("/api/v2/financial/predictions", { params: { limit: 20 } });
-      return res.data.alerts || [];
+      const res = await api.get("/financial/complaints", { params: { limit: 200 } });
+      return (res.data?.complaints || []) as Complaint[];
     },
   });
 
-  const complaints: Complaint[] = complaintsData || [];
+  // Merge: uploaded file complaints + backend complaints
+  const complaints: Complaint[] = [
+    ...allComplaints,
+    ...(backendComplaints ?? []).filter((bc) => !allComplaints.find((ac) => ac.complaint_id === bc.complaint_id)),
+  ];
 
   // Run simulation mutation
   const { mutate, data: simResult, isPending, error } = useMutation({
     mutationFn: async (params: { base_complaint_id: string; scenarios: Scenario[] }) => {
-      return (await api.post("/api/v2/what-if", {
+      return (await api.post("/v2/what-if", {
         base_complaint_id: params.base_complaint_id,
         scenarios: params.scenarios,
       })).data;
@@ -85,6 +207,14 @@ export default function WhatIfSimulation() {
   const handleRun = () => {
     if (!selectedComplaint || scenarios.length === 0) return;
     mutate({ base_complaint_id: selectedComplaint, scenarios });
+  };
+
+  const handleFileLoaded = (loadedComplaints: Complaint[], fileName: string) => {
+    setAllComplaints((prev) => [...loadedComplaints, ...prev]);
+    setUploadedFileName(fileName);
+    if (loadedComplaints.length > 0 && !selectedComplaint) {
+      setSelectedComplaint(loadedComplaints[0].complaint_id);
+    }
   };
 
   const addScenario = () => {
@@ -107,6 +237,8 @@ export default function WhatIfSimulation() {
     { name: "Full Escalation", description: "All risk factors maximized", modifications: { velocity_24h: 1.0, fraud_amount_ratio: 1.0, linked_complaints: 1.0, complaint_density: 0.9, is_night: 1.0 } },
   ];
 
+  const selectedObj = complaints.find((c) => c.complaint_id === selectedComplaint);
+
   return (
     <div className="space-y-5">
       {/* Header KPIs */}
@@ -115,24 +247,24 @@ export default function WhatIfSimulation() {
         <StatCard
           label="Baseline Risk"
           value={simResult?.scenarios?.[0]?.probability != null ? `${(simResult.scenarios[0].probability * 100).toFixed(0)}%` : "—"}
-          color="#38bdf8"
-          icon={<Target className="h-4 w-4" />}
+          color="#38bdf8" icon={<Target className="h-4 w-4" />}
         />
         <StatCard
           label="Max Predicted"
           value={simResult?.scenarios?.length ? `${(Math.max(...simResult.scenarios.map((s: PredictionResult) => s.probability)) * 100).toFixed(0)}%` : "—"}
-          color="#f87171"
-          icon={<AlertTriangle className="h-4 w-4" />}
+          color="#f87171" icon={<AlertTriangle className="h-4 w-4" />}
         />
         <StatCard
           label="Risk Delta"
           value={simResult?.scenarios && simResult.scenarios.length >= 2
             ? `+${((Math.max(...simResult.scenarios.map((s: PredictionResult) => s.probability)) - simResult.scenarios[0].probability) * 100).toFixed(0)}%`
             : "—"}
-          color="#fb923c"
-          icon={<TrendingUp className="h-4 w-4" />}
+          color="#fb923c" icon={<TrendingUp className="h-4 w-4" />}
         />
       </div>
+
+      {/* File Upload */}
+      <FileUploadCard onFileLoaded={handleFileLoaded} />
 
       {/* Scenario Builder */}
       <Card
@@ -140,26 +272,52 @@ export default function WhatIfSimulation() {
         subtitle="Hypothesize and test different fraud scenarios — see how risk predictions change"
       >
         <div className="space-y-4">
+          {/* Data source info */}
+          {uploadedFileName && (
+            <div className="flex items-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/5 px-3 py-2 text-xs">
+              <FileText className="h-4 w-4 text-cyber-green" />
+              <span className="text-cyber-green font-semibold">Loaded {allComplaints.length} records from {uploadedFileName}</span>
+            </div>
+          )}
+
           {/* Base complaint selector */}
           <div>
-            <label className="label">Base Complaint</label>
-            {complaintsLoading ? (
+            <label className="label">Base Complaint ({complaints.length} available)</label>
+            {complaintsLoading && complaints.length === 0 ? (
               <Skeleton className="h-10" />
+            ) : complaints.length === 0 ? (
+              <p className="text-xs text-slate-500 py-2">No complaints available. Upload a CSV/JSON file above to get started.</p>
             ) : (
               <select
                 className="input"
                 value={selectedComplaint}
                 onChange={(e) => setSelectedComplaint(e.target.value)}
               >
-                <option value="">Select a complaint to analyze...</option>
+                <option value="">Select a complaint to analyze…</option>
                 {complaints.map((c) => (
-                  <option key={c.alert_id || c.complaint_id} value={c.complaint_id || c.alert_id}>
-                    {c.complaint_id || c.alert_id} — {c.district}, {c.state} (₹{(c.amount || 0).toLocaleString()})
+                  <option key={c.complaint_id} value={c.complaint_id}>
+                    {c.complaint_id} — {c.district}, {c.state} (₹{(c.amount || 0).toLocaleString()}) [{c.fraud_type}]
                   </option>
                 ))}
               </select>
             )}
           </div>
+
+          {/* Selected complaint details */}
+          {selectedObj && (
+            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
+              <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+                <div><span className="text-slate-500">State:</span> <span className="text-slate-200">{selectedObj.state}</span></div>
+                <div><span className="text-slate-500">District:</span> <span className="text-slate-200">{selectedObj.district}</span></div>
+                <div><span className="text-slate-500">Amount:</span> <span className="font-mono text-cyber-red">₹{selectedObj.amount.toLocaleString()}</span></div>
+                <div><span className="text-slate-500">Type:</span> <span className="text-slate-200">{selectedObj.fraud_type}</span></div>
+                <div><span className="text-slate-500">Risk:</span> <span className="font-mono" style={{ color: RISK_COLORS[selectedObj.risk_level ?? (selectedObj.risk_score >= 0.85 ? "CRITICAL" : selectedObj.risk_score >= 0.6 ? "HIGH" : "MEDIUM")] }}>{(selectedObj.risk_score * 100).toFixed(0)}%</span></div>
+                {selectedObj.status && <div><span className="text-slate-500">Status:</span> <span className="text-slate-200">{selectedObj.status}</span></div>}
+                {selectedObj.bank && <div><span className="text-slate-500">Bank:</span> <span className="text-slate-200">{selectedObj.bank}</span></div>}
+                {selectedObj.description && <div className="col-span-2"><span className="text-slate-500">Description:</span> <span className="text-slate-300">{selectedObj.description.slice(0, 100)}{selectedObj.description.length > 100 ? "…" : ""}</span></div>}
+              </div>
+            </div>
+          )}
 
           {/* Scenarios */}
           <div>
@@ -205,12 +363,7 @@ export default function WhatIfSimulation() {
                       <div key={key}>
                         <label className="text-[10px] text-slate-500">{key.replace(/_/g, ' ')}</label>
                         <input
-                          type="number"
-                          className="input text-xs"
-                          placeholder="0.0-1.0"
-                          min="0"
-                          max="10"
-                          step="0.1"
+                          type="number" className="input text-xs" placeholder="0.0-1.0" min="0" max="10" step="0.1"
                           value={newScenario.modifications[key] ?? ''}
                           onChange={e => setNewScenario({
                             ...newScenario,
@@ -233,11 +386,7 @@ export default function WhatIfSimulation() {
               {presetScenarios.map((preset) => (
                 <button
                   key={preset.name}
-                  onClick={() => {
-                    if (!scenarios.find(s => s.name === preset.name)) {
-                      setScenarios([...scenarios, preset]);
-                    }
-                  }}
+                  onClick={() => { if (!scenarios.find(s => s.name === preset.name)) setScenarios([...scenarios, preset]); }}
                   className="rounded-md border border-night-700 bg-night-850 px-3 py-1.5 text-[11px] text-slate-300 hover:border-electric-500/50 hover:text-white transition-colors"
                 >
                   + {preset.name}
@@ -254,7 +403,7 @@ export default function WhatIfSimulation() {
               disabled={isPending || !selectedComplaint || scenarios.length === 0}
             >
               {isPending ? (
-                <><span className="animate-spin mr-1">⟳</span> Simulating...</>
+                <><RefreshCcw className="h-4 w-4 animate-spin" /> Simulating…</>
               ) : (
                 <><Play className="h-4 w-4" /> Run Simulation</>
               )}
@@ -351,7 +500,7 @@ export default function WhatIfSimulation() {
           <EmptyState
             icon={<Brain className="h-8 w-8" />}
             title="No simulation results yet"
-            description="Select a base complaint and configure scenarios, then click Run Simulation."
+            description="Upload a CSV/JSON file or select a base complaint, configure scenarios, then click Run Simulation."
           />
         </Card>
       )}

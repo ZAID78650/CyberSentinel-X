@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     vector_db_path: str = "./data/vector_store"
 
     # CORS / URLs
-    cors_origins: str = "http://localhost:5173,http://localhost:3000"
-    frontend_url: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
+    frontend_url: str = "http://localhost:5174"
     backend_url: str = "http://localhost:8000"
 
     # Rate limiting (requests per window per key)

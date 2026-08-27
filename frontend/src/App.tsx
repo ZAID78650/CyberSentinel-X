@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./layouts/AppLayout";
 import { useAuth } from "./contexts/AuthContext";
+import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -49,6 +50,11 @@ import LeaDashboard from "./pages/LeaDashboard";
 import ModelPerformance from "./pages/ModelPerformance";
 import WhatIfSimulation from "./pages/WhatIfSimulation";
 import SystemMonitor from "./pages/SystemMonitor";
+import CybercrimeScanner from "./pages/CybercrimeScanner";
+import SihDemo from "./pages/SihDemo";
+import EntityNetwork from "./pages/EntityNetwork";
+import ThreatGlobe from "./pages/ThreatGlobe";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -64,7 +70,9 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <Routes>
+      <Route path="/" element={<Home />} />
       <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
       <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
       <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
@@ -122,9 +130,14 @@ export default function App() {
         <Route path="/model-performance" element={<ModelPerformance />} />
         <Route path="/what-if" element={<WhatIfSimulation />} />
         <Route path="/monitoring" element={<SystemMonitor />} />
+        <Route path="/cybercrime-scanner" element={<CybercrimeScanner />} />
+        <Route path="/sih-demo" element={<SihDemo />} />
+        <Route path="/entity-network" element={<EntityNetwork />} />
+        <Route path="/threat-globe" element={<ThreatGlobe />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
+    </ErrorBoundary>
   );
 }

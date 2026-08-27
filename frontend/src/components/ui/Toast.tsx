@@ -66,8 +66,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           >
             <div className="mt-0.5 shrink-0">{ICONS[t.kind]}</div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-slate-100">{t.title}</p>
-              {t.description && <p className="mt-0.5 text-xs text-slate-400">{t.description}</p>}
+              <p className="text-sm font-semibold" style={{ color: "var(--on-surface)" }}>{t.title}</p>
+              {t.description && <p className="mt-0.5 text-xs" style={{ color: "var(--on-surface-muted)" }}>{t.description}</p>}
             </div>
             <button onClick={() => remove(t.id)} className="text-slate-500 hover:text-slate-200">
               <X className="h-4 w-4" />

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Cpu, HardDrive, RefreshCcw, Server, Zap } from "lucide-react";
 import { api } from "../services/api";
 import { Card, Skeleton, StatCard } from "../components/ui";
+import { MemoryStick } from "lucide-react";
 
 interface SystemData {
   status: string;
@@ -51,13 +52,13 @@ function MeterBar({ value, color, label }: { value: number; color: string; label
 export default function SystemMonitor() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['system-monitor'],
-    queryFn: async () => (await api.get('/api/v2/monitoring/system')).data as SystemData,
+    queryFn: async () => (await api.get('/v2/monitoring/system')).data as SystemData,
     refetchInterval: 30000,
   });
 
   const { data: perfData, isLoading: perfLoading } = useQuery({
     queryKey: ['perf-monitor'],
-    queryFn: async () => (await api.get('/api/v2/monitoring/performance')).data,
+    queryFn: async () => (await api.get('/v2/monitoring/performance')).data,
     refetchInterval: 60000,
   });
 

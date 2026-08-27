@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { WS_URL } from "../config";
-import { tokenStore } from "../services/api";
+import { tokenStore, isDemoMode } from "../services/api";
 
 export interface WsMessage {
   event: string;
@@ -37,8 +37,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // In demo mode, don't try to connect — just stay disconnected
+    if (isDemoMode()) {
+      setConnected(false);
+      return;
+    }
+
     disposedRef.current = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let failedAttempts = 0;
 
     const connect = () => {
       if (disposedRef.current) return;
@@ -50,6 +57,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
       ws.onopen = () => {
         reconnectAttempt.current = 0;
+        failedAttempts = 0;
         setConnected(true);
       };
       ws.onmessage = (ev) => {
@@ -64,6 +72,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       ws.onclose = () => {
         setConnected(false);
         if (disposedRef.current) return;
+        failedAttempts += 1;
+        // Stop reconnecting after 5 failed attempts to avoid infinite loop
+        if (failedAttempts > 5) return;
         const delay = Math.min(1000 * 2 ** reconnectAttempt.current, 15000);
         reconnectAttempt.current += 1;
         retryTimer = setTimeout(connect, delay);
@@ -80,8 +91,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const value = useMemo(
+    () => ({ connected, lastMessage, on, send }),
+    [connected, lastMessage, on, send],
+  );
+
   return (
-    <WebSocketContext.Provider value={{ connected, lastMessage, on, send }}>{children}</WebSocketContext.Provider>
+    <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>
   );
 }
 

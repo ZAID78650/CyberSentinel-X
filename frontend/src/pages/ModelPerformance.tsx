@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle, Brain, ChevronDown, Cpu, GitBranch, LineChart,
-  RefreshCcw, Shield, TrendingUp, Zap,
+  RefreshCcw, Shield, Target, TrendingUp, Zap,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
@@ -77,18 +77,18 @@ export default function ModelPerformance() {
 
   const { data: modelData, isLoading: modelLoading, refetch: refetchModel } = useQuery({
     queryKey: ['model-info-v2'],
-    queryFn: async () => (await api.get('/api/v2/model/info')).data as ModelInfo,
+    queryFn: async () => (await api.get('/v2/model/info')).data as ModelInfo,
   });
 
   const { data: driftData, isLoading: driftLoading, refetch: refetchDrift } = useQuery({
     queryKey: ['model-drift'],
-    queryFn: async () => (await api.get('/api/v2/model/drift')).data as DriftData,
+    queryFn: async () => (await api.get('/v2/model/drift')).data as DriftData,
     enabled: showDrift,
   });
 
   const { data: perfData, isLoading: perfLoading } = useQuery({
     queryKey: ['performance-bench'],
-    queryFn: async () => (await api.get('/api/v2/monitoring/performance')).data,
+    queryFn: async () => (await api.get('/v2/monitoring/performance')).data,
   });
 
   if (modelLoading) {

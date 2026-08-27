@@ -7,6 +7,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string, rememberMe: boolean) => Promise<AuthResponse>;
+  loginWithOAuth: (user: User) => void;
   register: (payload: {
     full_name: string;
     email: string;
@@ -30,7 +31,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onExpired = () => setUser(null);
     const onLogout = () => setUser(null);
     const onOAuth = () => {
-      // Tokens are already stored; fetch the user profile to complete sign-in
+      // Synchronously pick up any user stored by demo auth helpers so
+      // setUser is called before the caller navigates to /dashboard.
+      const stored = tokenStore.getUser();
+      if (stored) {
+        setUser(stored);
+        return;
+      }
+      // Real OAuth: fetch the profile from the backend.
       api.get<User>("/auth/me").then((res) => {
         setUser(res.data);
         tokenStore.setUser(res.data);
@@ -90,6 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const handleLoginWithOAuth = useCallback((oauthUser: User) => {
+    tokenStore.setUser(oauthUser);
+    setUser(oauthUser);
+  }, []);
+
   const hasRole = useCallback(
     (...roles: string[]) => {
       if (!user) return false;
@@ -104,12 +117,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!user,
       isLoading,
       login: handleLogin,
+      loginWithOAuth: handleLoginWithOAuth,
       register: handleRegister,
       logout: handleLogout,
       refreshUser: handleRefreshUser,
       hasRole,
     }),
-    [user, isLoading, handleLogin, handleRegister, handleLogout, handleRefreshUser, hasRole],
+    [user, isLoading, handleLogin, handleLoginWithOAuth, handleRegister, handleLogout, handleRefreshUser, hasRole],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

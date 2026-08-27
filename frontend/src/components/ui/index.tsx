@@ -48,10 +48,10 @@ export function Card({
   return (
     <div className={`glass ${className}`}>
       {(title || actions) && (
-        <div className="flex items-start justify-between border-b border-night-700/70 px-5 py-3.5">
+        <div className="flex items-start justify-between border-b px-5 py-3.5" style={{ borderColor: "var(--surface-border)" }}>
           <div>
-            {title && <h3 className="text-sm font-bold tracking-wide text-slate-200">{title}</h3>}
-            {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
+            {title && <h3 className="text-sm font-bold tracking-wide" style={{ color: "var(--on-surface)" }}>{title}</h3>}
+            {subtitle && <p className="mt-0.5 text-xs" style={{ color: "var(--on-surface-faint)" }}>{subtitle}</p>}
           </div>
           {actions}
         </div>
@@ -68,9 +68,9 @@ export function Skeleton({ className = "" }: { className?: string }) {
 export function EmptyState({ icon, title, description }: { icon?: ReactNode; title: string; description?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-      {icon && <div className="text-slate-600">{icon}</div>}
-      <p className="text-sm font-semibold text-slate-400">{title}</p>
-      {description && <p className="max-w-sm text-xs text-slate-600">{description}</p>}
+      {icon && <div style={{ color: "var(--on-surface-faint)" }}>{icon}</div>}
+      <p className="text-sm font-semibold" style={{ color: "var(--on-surface-muted)" }}>{title}</p>
+      {description && <p className="max-w-sm text-xs" style={{ color: "var(--on-surface-faint)" }}>{description}</p>}
     </div>
   );
 }
@@ -86,13 +86,13 @@ export function StatCard({ label, value, color = "#38bdf8", icon, hint }: {
     <div className="glass glass-hover relative overflow-hidden p-4">
       <div className="absolute inset-x-0 top-0 h-0.5" style={{ background: color, boxShadow: `0 0 12px ${color}` }} />
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>{label}</p>
         {icon && <div style={{ color }}>{icon}</div>}
       </div>
       <p className="kpi-value mt-1.5 truncate text-2xl xl:text-3xl" style={{ color }} title={typeof value === "number" ? value.toLocaleString() : String(value)}>
         {typeof value === "number" ? value.toLocaleString() : value}
       </p>
-      {hint && <p className="mt-0.5 text-[11px] text-slate-600">{hint}</p>}
+      {hint && <p className="mt-0.5 text-[11px]" style={{ color: "var(--on-surface-faint)" }}>{hint}</p>}
     </div>
   );
 }
@@ -108,14 +108,14 @@ export function Modal({ open, onClose, title, children, footer }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="glass w-full max-w-lg p-0" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-night-700/70 px-5 py-3.5">
-          <h3 className="text-sm font-bold text-slate-100">{title}</h3>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-200">
+        <div className="flex items-center justify-between border-b px-5 py-3.5" style={{ borderColor: "var(--surface-border)" }}>
+          <h3 className="text-sm font-bold" style={{ color: "var(--on-surface)" }}>{title}</h3>
+          <button onClick={onClose} style={{ color: "var(--on-surface-faint)" }} className="hover:opacity-80">
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="max-h-[60vh] overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-night-700/70 px-5 py-3.5">{footer}</div>}
+        {footer && <div className="flex justify-end gap-2 border-t px-5 py-3.5" style={{ borderColor: "var(--surface-border)" }}>{footer}</div>}
       </div>
     </div>
   );
@@ -123,7 +123,7 @@ export function Modal({ open, onClose, title, children, footer }: {
 
 export function ProgressBar({ value, color = "#38bdf8", className = "" }: { value: number; color?: string; className?: string }) {
   return (
-    <div className={`h-2 w-full overflow-hidden rounded-full bg-night-800 ${className}`}>
+    <div className={`h-2 w-full overflow-hidden rounded-full ${className}`} style={{ background: "var(--surface-raised)" }}>
       <div
         className="h-full rounded-full transition-all duration-500"
         style={{ width: `${Math.min(100, Math.max(0, value))}%`, background: color, boxShadow: `0 0 8px ${color}` }}
@@ -143,7 +143,7 @@ export function AccuracyGauge({ accuracy, precision, recall, f1 }: {
     <div className="flex items-center gap-5">
       <div className="relative h-28 w-28 shrink-0">
         <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
-          <circle cx="50" cy="50" r="42" fill="none" stroke="#111a30" strokeWidth="10" />
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--surface-raised)" strokeWidth="10" />
           <circle
             cx="50" cy="50" r="42" fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
             strokeDasharray={`${(accuracy / 100) * 264} 264`}
@@ -152,7 +152,7 @@ export function AccuracyGauge({ accuracy, precision, recall, f1 }: {
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="font-mono text-2xl font-bold" style={{ color }}>{accuracy.toFixed(2)}%</span>
-          <span className="text-[9px] uppercase tracking-wider text-slate-500">accuracy</span>
+          <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>accuracy</span>
         </div>
       </div>
       <div className="space-y-1.5">
@@ -162,8 +162,8 @@ export function AccuracyGauge({ accuracy, precision, recall, f1 }: {
           { label: "F1 Score", value: f1 },
         ].map((m) => (
           <div key={m.label} className="flex items-center justify-between gap-6">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{m.label}</span>
-            <span className="font-mono text-sm font-bold text-slate-200">{m.value?.toFixed(2)}%</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>{m.label}</span>
+            <span className="font-mono text-sm font-bold" style={{ color: "var(--on-surface)" }}>{m.value?.toFixed(2)}%</span>
           </div>
         ))}
       </div>
@@ -177,7 +177,7 @@ export function RiskGauge({ score, label }: { score: number; label?: string }) {
     <div className="flex items-center gap-4">
       <div className="relative h-24 w-24">
         <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
-          <circle cx="50" cy="50" r="42" fill="none" stroke="#111a30" strokeWidth="10" />
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--surface-raised)" strokeWidth="10" />
           <circle
             cx="50" cy="50" r="42" fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
             strokeDasharray={`${(score / 100) * 264} 264`}
@@ -186,7 +186,7 @@ export function RiskGauge({ score, label }: { score: number; label?: string }) {
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="font-mono text-2xl font-bold" style={{ color }}>{Math.round(score)}</span>
-          <span className="text-[9px] uppercase tracking-wider text-slate-500">{label ?? "risk"}</span>
+          <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>{label ?? "risk"}</span>
         </div>
       </div>
     </div>

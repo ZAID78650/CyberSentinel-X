@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -97,6 +97,16 @@ class UserOut(BaseModel):
     two_factor_enabled: bool = False
     created_at: Optional[datetime] = None
     roles: List[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_tfa_enabled(cls, data):
+        """Map the ORM model's tfa_enabled attribute to two_factor_enabled."""
+        if hasattr(data, "tfa_enabled"):
+            data.two_factor_enabled = data.tfa_enabled
+        elif isinstance(data, dict) and "tfa_enabled" in data:
+            data["two_factor_enabled"] = data["tfa_enabled"]
+        return data
 
     @field_validator("roles", mode="before")
     @classmethod

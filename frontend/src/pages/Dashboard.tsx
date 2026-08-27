@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -18,6 +18,8 @@ import AttackBar3D from "../components/charts/AttackBar3D";
 import EventFlowChart from "../components/charts/EventFlowChart";
 import type { DashboardSummary, SecurityEvent } from "../types";
 import { useAuth } from "../contexts/AuthContext";
+import { useTheme } from "../contexts/ThemeContext";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: "#f87171",
@@ -42,7 +44,7 @@ function ChartTooltip({ active, payload, label, labelFormatter }: {
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border border-night-700 bg-night-900/95 px-3 py-2 font-mono text-[11px] shadow-panel backdrop-blur">
+    <div className="rounded-lg border px-3 py-2 font-mono text-[11px] shadow-panel backdrop-blur" style={{ borderColor: "var(--surface-border)", background: "var(--surface)" }}>
       {label !== undefined && (
         <p className="mb-1 text-slate-400">
           {labelFormatter ? labelFormatter(label, payload) : String(label)}
@@ -101,7 +103,8 @@ function SimulatorPanel() {
             key={s.key}
             onClick={() => run(s.key)}
             disabled={running !== null}
-            className="group flex items-start gap-3 rounded-lg border border-night-700 bg-night-850/60 p-3 text-left transition hover:border-electric-500/50 hover:shadow-glow disabled:opacity-60"
+            className="group flex items-start gap-3 rounded-lg border p-3 text-left transition disabled:opacity-60"
+            style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}
           >
             {running === s.key ? (
               <Loader2 className="mt-0.5 h-5 w-5 animate-spin" style={{ color: s.color }} />
@@ -126,7 +129,7 @@ function AgentStatusPanel({ statuses }: { statuses: DashboardSummary["agent_stat
     <Card title="AI Agent Status" subtitle="Live orchestration health">
       <div className="space-y-2.5">
         {statuses.map((a) => (
-          <div key={a.name} className="flex items-center gap-3 rounded-lg bg-night-850/60 px-3 py-2">
+          <div key={a.name} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: "var(--surface-raised)" }}>
             <span style={{ color: colorFor(a.status) }}>{AGENT_ICONS[a.name]}</span>
             <span className="flex-1 text-xs font-medium text-slate-300">{a.name}</span>
             <span className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: colorFor(a.status) }}>
@@ -167,7 +170,7 @@ function LiveEventFeed() {
       {events.length === 0 && <EmptyState icon={<Siren className="h-8 w-8" />} title="No events yet" description="Run a simulation or ingest a dataset to stream live events." />}
       <div className="space-y-1.5">
         {events.map((e) => (
-          <div key={e.event_id as string} className="flex items-center gap-3 rounded-md bg-night-850/50 px-3 py-2 font-mono text-[11px]">
+          <div key={e.event_id as string} className="flex items-center gap-3 rounded-md px-3 py-2 font-mono text-[11px]" style={{ background: "var(--surface-raised)" }}>
             <SeverityBadge severity={e.severity as string} />
             <span className="flex-1 truncate text-slate-300">{e.event_type as string}</span>
             {Boolean(e.is_anomalous) && (
@@ -183,11 +186,16 @@ function LiveEventFeed() {
 
 function useSocketEvent(event: string, handler: (data: Record<string, unknown>) => void) {
   const { on } = useSocket();
-  const cb = useCallback(handler, [handler]);
-  useEffect(() => on(event, cb), [on, event, cb]);
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+  useEffect(() => on(event, (data) => handlerRef.current(data)), [on, event]);
 }
 
 export default function Dashboard() {
+  const { theme } = useTheme();
+  const chartGridColor = theme === 'dark' ? '#1a2540' : '#e2e8f0';
+  const chartTextColor = theme === 'dark' ? '#64748b' : '#94a3b8';
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => (await api.get<DashboardSummary>("/dashboard/summary")).data,
@@ -200,6 +208,16 @@ export default function Dashboard() {
   const { warning, success, error: toastError } = useToast();
   const queryClient = useQueryClient();
   const [reporting, setReporting] = useState(false);
+
+  // ── Financial Crime Intelligence Data ──
+  const { data: finData } = useQuery({
+    queryKey: ["financial-dashboard"],
+    queryFn: async () => (await api.get<any>("/financial/dashboard")).data,
+  });
+  const { data: predData } = useQuery({
+    queryKey: ["predictions"],
+    queryFn: async () => (await api.get<any>("/financial/predictions", { params: { limit: 5 } })).data,
+  });
 
   useSocketEvent("new_incident", () => {
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -285,16 +303,6 @@ export default function Dashboard() {
     }, {}),
   ).map(([name, value]) => ({ name, value }));
 
-  // ── Financial Crime Intelligence Data ──
-  const { data: finData } = useQuery({
-    queryKey: ["financial-dashboard"],
-    queryFn: async () => (await api.get<any>("/financial/dashboard")).data,
-  });
-  const { data: predData } = useQuery({
-    queryKey: ["predictions"],
-    queryFn: async () => (await api.get<any>("/financial/predictions", { params: { limit: 5 } })).data,
-  });
-
   return (
     <div className="space-y-5">
       {/* Financial Intelligence Hero Section */}
@@ -309,20 +317,20 @@ export default function Dashboard() {
           }
         >
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Total Complaints</p>
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
+              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>Total Complaints</p>
               <p className="font-mono text-xl font-bold text-electric-400">{finData.summary.total_complaints}</p>
             </div>
-            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Amount at Risk</p>
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
+              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>Amount at Risk</p>
               <p className="font-mono text-xl font-bold text-cyber-red">₹{(finData.summary.total_amount / 100000).toFixed(1)}L</p>
             </div>
-            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">High Risk Zones</p>
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
+              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>High Risk Zones</p>
               <p className="font-mono text-xl font-bold text-cyber-orange">{finData.summary.high_risk_zones} <span className="text-[10px] text-slate-500">/ {finData.summary.total_zones}</span></p>
             </div>
-            <div className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Active Alerts</p>
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
+              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>Active Alerts</p>
               <p className="font-mono text-xl font-bold text-cyber-purple">{finData.summary.active_alerts}</p>
             </div>
           </div>
@@ -356,29 +364,35 @@ export default function Dashboard() {
 
       {/* 3D threat analysis */}
       <div className="grid gap-5 lg:grid-cols-3">
-        <Card
-          title="3D Threat Space"
-          subtitle="UNSW-NB15 network flows — bytes sent / received / rate, colored by attack family"
-          className="lg:col-span-2"
-          actions={
-            <Link to="/data-sources" className="text-xs font-semibold text-electric-400 hover:underline">
-              Dataset <ChevronRight className="inline h-3 w-3" />
-            </Link>
-          }
-        >
-          <ThreatSpace3D height={400} />
-        </Card>
+        <ErrorBoundary>
+          <Card
+            title="3D Threat Space"
+            subtitle="UNSW-NB15 network flows — bytes sent / received / rate, colored by attack family"
+            className="lg:col-span-2"
+            actions={
+              <Link to="/data-sources" className="text-xs font-semibold text-electric-400 hover:underline">
+                Dataset <ChevronRight className="inline h-3 w-3" />
+              </Link>
+            }
+          >
+            <ThreatSpace3D height={400} />
+          </Card>
+        </ErrorBoundary>
 
-        <Card title="Attack Rhythm 3D" subtitle="Attack family × hour of day — flow volume">
-          <AttackBar3D height={400} />
-        </Card>
+        <ErrorBoundary>
+          <Card title="Attack Rhythm 3D" subtitle="Attack family × hour of day — flow volume">
+            <AttackBar3D height={400} />
+          </Card>
+        </ErrorBoundary>
       </div>
 
       {/* Live flow + AI investigation + agents */}
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
           <Card title="Live Threat Flow" subtitle="Hourly event volume — total vs anomalous (real-time via WebSocket)">
-            <EventFlowChart hours={48} />
+            <ErrorBoundary>
+              <EventFlowChart hours={48} />
+            </ErrorBoundary>
           </Card>
 
           <Card title="AI Investigation Summary" subtitle="Latest agent finding">
@@ -439,9 +453,9 @@ export default function Dashboard() {
                       </linearGradient>
                     ))}
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1a2540" vertical={false} />
-                  <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} axisLine={{ stroke: "#1a2540" }} />
-                  <YAxis stroke="#64748b" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
+                  <XAxis dataKey="name" stroke={chartTextColor} fontSize={11} tickLine={false} axisLine={{ stroke: chartGridColor }} />
+                  <YAxis stroke={chartTextColor} fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} />
                   <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(56,189,248,0.06)" }} />
                   <Bar dataKey="value" name="Alerts" radius={[8, 8, 2, 2]} animationDuration={700}>
                     {sevData.map((s) => (
@@ -461,9 +475,9 @@ export default function Dashboard() {
                       <stop offset="100%" stopColor="#f87171" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1a2540" vertical={false} />
-                  <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} axisLine={{ stroke: "#1a2540" }} />
-                  <YAxis stroke="#64748b" fontSize={11} domain={[0, 100]} tickLine={false} axisLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
+                  <XAxis dataKey="date" stroke={chartTextColor} fontSize={11} tickLine={false} axisLine={{ stroke: chartGridColor }} />
+                  <YAxis stroke={chartTextColor} fontSize={11} domain={[0, 100]} tickLine={false} axisLine={false} />
                   <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#334155", strokeDasharray: "4 4" }} />
                   <Area type="monotone" dataKey="avg_risk" name="Avg risk" stroke="#f87171" strokeWidth={2.5} fill="url(#riskGrad)" dot={{ r: 3, fill: "#f87171", strokeWidth: 0 }} animationDuration={700} />
                 </AreaChart>
@@ -505,7 +519,7 @@ export default function Dashboard() {
               {data.top_threat_sources.map((s, i) => (
                 <div key={s.source} className="flex items-center gap-3">
                   <span className="w-32 truncate font-mono text-[11px] text-slate-400">{s.source}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-night-800">
+                  <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: "var(--surface-raised)" }}>
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-electric-500 to-cyber-red transition-all duration-700"
                       style={{ width: `${Math.min(100, (s.count / Math.max(1, data.top_threat_sources[0].count)) * 100)}%`, boxShadow: i === 0 ? "0 0 8px rgba(248,113,113,0.5)" : undefined }}
@@ -545,9 +559,9 @@ export default function Dashboard() {
                   <stop offset="100%" stopColor="#f87171" />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1a2540" vertical={false} />
-              <XAxis dataKey="t" stroke="#64748b" fontSize={11} tickLine={false} axisLine={{ stroke: "#1a2540" }} />
-              <YAxis stroke="#64748b" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
+              <XAxis dataKey="t" stroke={chartTextColor} fontSize={11} tickLine={false} axisLine={{ stroke: chartGridColor }} />
+              <YAxis stroke={chartTextColor} fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#334155", strokeDasharray: "4 4" }} />
               <Line type="monotone" dataKey="v" name="Anomalous events" stroke="url(#anomStroke)" strokeWidth={2.5} dot={{ r: 4, fill: "#a78bfa", strokeWidth: 0 }} activeDot={{ r: 5 }} animationDuration={700} />
             </LineChart>

@@ -19,6 +19,14 @@ server {
 
     proxy_ssl_server_name on;
 
+    # Frontend health check — returns 200 if nginx is serving.
+    # Render pings this to detect spin-down on free tier.
+    location = /healthz {
+        access_log off;
+        return 200 '{"status":"ok","service":"cybersentinel-frontend"}';
+        add_header Content-Type application/json;
+    }
+
     # API proxy — forwards /api/* as-is to the backend (backend mounts routes under /api/)
     location /api/ {
         proxy_pass ${BACKEND_URL};
@@ -30,7 +38,7 @@ server {
         proxy_send_timeout 300s;
     }
 
-    # Health proxy
+    # Backend health proxy
     location = /health {
         proxy_pass ${BACKEND_URL}/health;
     }

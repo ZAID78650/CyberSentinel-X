@@ -117,7 +117,7 @@ services:
         value: "80"
       - key: BACKEND_URL
         value: https://cybersentinel-backend-t5pv.onrender.com
-    healthCheckPath: /
+    healthCheckPath: /healthz
 # ---------------------------------------------------------------------------
 # Managed PostgreSQL
 # ---------------------------------------------------------------------------

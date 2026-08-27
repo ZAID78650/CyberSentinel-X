@@ -103,6 +103,7 @@ services:
       - key: UNSW_INGEST_LIMIT
         value: "0"
     healthCheckPath: /health
+    autoDeploy: true
   # ---------------------------------------------------------------------------
   # Frontend — static build served by nginx, proxying /api + /ws to the backend
   # ---------------------------------------------------------------------------
@@ -118,6 +119,7 @@ services:
       - key: BACKEND_URL
         value: https://cybersentinel-backend-t5pv.onrender.com
     healthCheckPath: /healthz
+    autoDeploy: true
 # ---------------------------------------------------------------------------
 # Managed PostgreSQL
 # ---------------------------------------------------------------------------

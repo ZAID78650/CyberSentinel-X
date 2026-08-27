@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./layouts/AppLayout";
 import { useAuth } from "./contexts/AuthContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useKeepAlive } from "./hooks/useKeepAlive";
 
 // ── Lazy-loaded pages (code-split into separate chunks) ───────────────
 const Home = lazy(() => import("./pages/Home"));
@@ -100,6 +101,8 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useKeepAlive();
+
   return (
     <ErrorBoundary>
       <Suspense fallback={<PageLoader />}>

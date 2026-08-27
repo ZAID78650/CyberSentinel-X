@@ -37,10 +37,12 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # like $proxy_host and $remote_addr. Instead we run envsubst with an
 # explicit variable list in the entrypoint.
 COPY frontend/nginx.conf.template /etc/nginx/nginx.conf.template
+COPY frontend/entrypoint.sh /docker-entrypoint-custom.sh
+RUN chmod +x /docker-entrypoint-custom.sh
 
 EXPOSE 80
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -q -O - http://localhost/ || exit 1
 
-CMD /bin/sh -c 'envsubst "$$BACKEND_URL" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf && nginx -g "daemon off;"'
+ENTRYPOINT ["/docker-entrypoint-custom.sh"]

@@ -23,5 +23,18 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react":["react", "react-dom", "react-router-dom"],
+          "vendor-query": ["@tanstack/react-query"],
+          "vendor-charts": ["recharts"],
+          "vendor-echarts": ["echarts", "echarts-for-react"],
+          "vendor-flow": ["@xyflow/react"],
+          "vendor-icons": ["lucide-react"],
+          "vendor-http": ["axios"],
+        },
+      },
+    },
   },
 });

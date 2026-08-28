@@ -24,6 +24,7 @@ from app.schemas.auth import (
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
+    TwoFactorVerifyRequest,
     UserOut,
     UserRolesUpdate,
     UserSsoBlockUpdate,
@@ -601,7 +602,7 @@ def setup_2fa(db: Session = Depends(get_db), user: User = Depends(get_current_us
 
 
 @router.post("/2fa/verify")
-def verify_2fa(req: 'TwoFactorVerifyRequest', request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def verify_2fa(req: TwoFactorVerifyRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Verify a TOTP code and optionally enable 2FA.
 
     - When action is 'enable': verifies the code and enables 2FA if valid.

@@ -209,10 +209,10 @@ class FeatureEngine:
         features["unique_senders"] = min(1.0, len(set(t.get("from_account", "") for t in transactions)) / 10) if transactions else 0
 
         # Velocity features
-        features["velocity_1h"] = min(1.0, ctx.get("transactions_last_1h", 0) / 10)
-        features["velocity_6h"] = min(1.0, ctx.get("transactions_last_6h", 0) / 30)
-        features["velocity_24h"] = min(1.0, ctx.get("transactions_last_24h", 0) / 100)
-        features["velocity_7d"] = min(1.0, ctx.get("transactions_last_7d", 0) / 500)
+        features["velocity_1h"] = min(1.0, (ctx.get("transactions_last_1h") or 0) / 10)
+        features["velocity_6h"] = min(1.0, (ctx.get("transactions_last_6h") or 0) / 30)
+        features["velocity_24h"] = min(1.0, (ctx.get("transactions_last_24h") or 0) / 100)
+        features["velocity_7d"] = min(1.0, (ctx.get("transactions_last_7d") or 0) / 500)
 
         # Temporal features
         complaint_time = None
@@ -246,22 +246,22 @@ class FeatureEngine:
             features["dow_sin"] = 0.0
             features["dow_cos"] = 1.0
 
-        features["days_since_last_suspicious"] = min(1.0, ctx.get("days_since_last_suspicious", 30) / 365)
+        features["days_since_last_suspicious"] = min(1.0, (ctx.get("days_since_last_suspicious") or 30) / 365)
 
         # Geographic features
-        features["complaint_density"] = min(1.0, ctx.get("zone_complaint_count", 0) / 100)
-        features["withdrawal_density"] = min(1.0, ctx.get("zone_withdrawal_count", 0) / 50)
-        features["distance_to_hotspot"] = min(1.0, ctx.get("distance_to_nearest_hotspot_km", 100) / 500)
-        features["local_risk_score"] = min(1.0, ctx.get("zone_risk_score", 0))
-        features["district_risk_level"] = min(1.0, ctx.get("district_risk", 0))
-        features["state_risk_level"] = min(1.0, ctx.get("state_risk", 0))
+        features["complaint_density"] = min(1.0, (ctx.get("zone_complaint_count") or 0) / 100)
+        features["withdrawal_density"] = min(1.0, (ctx.get("zone_withdrawal_count") or 0) / 50)
+        features["distance_to_hotspot"] = min(1.0, (ctx.get("distance_to_nearest_hotspot_km") or 100) / 500)
+        features["local_risk_score"] = min(1.0, ctx.get("zone_risk_score") or 0)
+        features["district_risk_level"] = min(1.0, ctx.get("district_risk") or 0)
+        features["state_risk_level"] = min(1.0, ctx.get("state_risk") or 0)
 
         # Account features
-        features["account_age_days"] = min(1.0, ctx.get("account_age_days", 365) / 1825)
-        features["account_risk_score"] = min(1.0, ctx.get("account_risk", 0))
-        features["linked_complaints"] = min(1.0, ctx.get("account_linked_complaints", 0) / 10)
-        features["transaction_volume"] = min(1.0, ctx.get("account_transaction_volume", 0) / 10_000_000)
-        features["is_mule_suspected"] = 1.0 if ctx.get("is_mule_suspected", False) else 0.0
+        features["account_age_days"] = min(1.0, (ctx.get("account_age_days") or 365) / 1825)
+        features["account_risk_score"] = min(1.0, ctx.get("account_risk") or 0)
+        features["linked_complaints"] = min(1.0, (ctx.get("account_linked_complaints") or 0) / 10)
+        features["transaction_volume"] = min(1.0, (ctx.get("account_transaction_volume") or 0) / 10_000_000)
+        features["is_mule_suspected"] = 1.0 if ctx.get("is_mule_suspected") else 0.0
 
         # Fraud pattern features
         fraud_types = {
@@ -271,14 +271,14 @@ class FeatureEngine:
             "Phishing": 9, "SIM Swap Fraud": 10, "Investment Scam": 11,
         }
         features["fraud_type_encoded"] = fraud_types.get(complaint.get("fraud_type", ""), 6) / 11
-        features["fraud_amount_ratio"] = min(1.0, complaint.get("amount", 0) / max(ctx.get("avg_fraud_amount", 50_000), 1))
-        features["similarity_to_known_cases"] = min(1.0, ctx.get("similarity_score", 0.5))
-        features["pattern_cluster_id"] = min(1.0, ctx.get("cluster_id", 0) / 10)
+        features["fraud_amount_ratio"] = min(1.0, complaint.get("amount", 0) / max((ctx.get("avg_fraud_amount") or 50_000), 1))
+        features["similarity_to_known_cases"] = min(1.0, ctx.get("similarity_score") or 0.5)
+        features["pattern_cluster_id"] = min(1.0, (ctx.get("cluster_id") or 0) / 10)
 
         # Network features
-        features["degree_centrality"] = min(1.0, ctx.get("entity_degree", 0) / 50)
-        features["connected_components"] = min(1.0, ctx.get("component_size", 0) / 100)
-        features["related_cases_count"] = min(1.0, ctx.get("related_cases", 0) / 20)
+        features["degree_centrality"] = min(1.0, (ctx.get("entity_degree") or 0) / 50)
+        features["connected_components"] = min(1.0, (ctx.get("component_size") or 0) / 100)
+        features["related_cases_count"] = min(1.0, (ctx.get("related_cases") or 0) / 20)
 
         # ── Interaction features (v3) ──────────────────────────────────
         features["amount_x_velocity"] = features["amount_normalized"] * features["velocity_24h"]

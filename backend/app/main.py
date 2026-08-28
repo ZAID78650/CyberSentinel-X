@@ -37,14 +37,19 @@ from app.api.routes import (
     ueba,
     websocket,
 )
+_v2_import_err: str | None = None
 try:
     from app.api.routes import v2
     V2_AVAILABLE = True
 except Exception as _v2_err:
     v2 = None  # type: ignore[assignment]
     V2_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("V2 router unavailable (ML deps not installed): %s", _v2_err)
+    _v2_import_err = str(_v2_err)
+    import traceback as _tb
+    logging.getLogger(__name__).error(
+        "[FATAL] v2 router failed to import — ML endpoints will be unavailable. "
+        "Error: %s\n%s", _v2_err, _tb.format_exc()
+    )
 
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
@@ -166,8 +171,12 @@ app.include_router(websocket.router)
 app.include_router(financial.router)
 if V2_AVAILABLE:
     app.include_router(v2.router)
+    logger.info("V2 router loaded — %d ML endpoints registered", len(v2.router.routes))
 else:
-    logger.warning("V2 router not loaded — ML endpoints unavailable")
+    logger.warning(
+        "V2 router SKIPPED — ML endpoints unavailable. Import error: %s",
+        _v2_import_err or "unknown",
+    )
 
 
 @app.get("/", include_in_schema=False)

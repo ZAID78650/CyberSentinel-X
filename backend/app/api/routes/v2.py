@@ -25,11 +25,31 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel, Field
 
-from app.services.ml_engine import FEATURE_COLUMNS
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2", tags=["CyberSentinel V2"])
+
+# Lazy import — FEATURE_COLUMNS is loaded on first use so the v2 router
+# can register even when heavy ML deps (numpy, xgboost, lightgbm) are slow
+to install or missing.
+def _feature_columns():
+    from app.services.ml_engine import FEATURE_COLUMNS as _FC
+    return _FC
+
+# Module-level alias kept for backward compat; evaluated lazily via a
+class _LazyList:
+    """Proxy that defers list import to first element access."""
+    _inner = None
+    def _load(self):
+        if self._inner is None:
+            self._inner = _feature_columns()
+        return self._inner
+    def __getitem__(self, idx): return self._load()[idx]
+    def __len__(self): return len(self._load())
+    def __iter__(self): return iter(self._load())
+    def __bool__(self): return True
+
+FEATURE_COLUMNS = _LazyList()  # type: ignore[assignment]
 
 # ─── Lazy-loaded engines ───────────────────────────────────────────────
 _engine = None

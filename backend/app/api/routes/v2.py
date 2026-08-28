@@ -146,8 +146,8 @@ async def scan_dataset_v2(request: ScanRequest):
         db = SessionLocal()
 
         # Phase 1-2: Parse & Detect (via existing scanner)
-        # Cap at 10K rows to prevent timeout on large files
-        effective_limit = request.limit if request.limit > 0 else 10000
+        # Cap at 1K rows to prevent timeout/memory issues on Render free tier
+        effective_limit = request.limit if request.limit > 0 else 1000
         result = scan_dataset_file(db, path, limit=effective_limit, scan_id=scan_id)
 
         # Phase 3-4: Cybercrime intelligence enrichment
@@ -158,17 +158,17 @@ async def scan_dataset_v2(request: ScanRequest):
             logger.warning("Enrichment failed: %s", e)
 
         # Phase 5: ML Analysis (if sklearn available)
+        # Skip heavy ML training on every scan — only use already-trained engine.
+        # Training is done at startup or via /v2/model/retrain endpoint.
         ml_result = {}
         try:
             engine = _get_engine()
-            if not engine.classifier.trained:
-                _retrain_engine()
             ml_result = {
                 "trained": engine.classifier.trained,
-                "model_versions": engine.get_model_versions(),
+                "model_versions": engine.get_model_versions() if engine.classifier.trained else {},
             }
         except Exception as e:
-            logger.warning("ML engine failed: %s", e)
+            logger.warning("ML engine skipped during scan (will train at startup): %s", e)
             ml_result = {"error": str(e), "trained": False}
 
         # Phase 6: Data Quality

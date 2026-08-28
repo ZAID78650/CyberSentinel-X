@@ -214,8 +214,7 @@ function TFASetupPanel() {
 
 function TFAStatusCard() {
   const { data: status, isLoading, refetch } = useQuery({
-    queryKey: ["tfa-status"],
-    queryFn: async () => (await api.get("/api/auth/2fa/status")).data as TFAStatus,
+    queryKey: ["tfa-status"],      queryFn: async () => (await api.get("/auth/2fa/status")).data as TFAStatus,
   });
 
   const [disableCode, setDisableCode] = useState("");
@@ -226,7 +225,7 @@ function TFAStatusCard() {
 
   const disableMutation = useMutation({
     mutationFn: async (code: string) => {
-      const res = await api.post("/api/auth/2fa/verify", { code, action: "disable" });
+      const res = await api.post("/auth/2fa/verify", { code, action: "disable" });
       return (res.data as TFAResult).message;
     },
     onSuccess: (msg) => {

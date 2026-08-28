@@ -583,6 +583,18 @@ def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = 
 from app.services.totp import generate_secret, get_provisioning_uri, verify_token as totp_verify_token
 
 
+@router.get("/2fa/config")
+def get_2fa_config(user: User = Depends(get_current_user)):
+    """Return 2FA configuration/status for the current user (alias for frontend)."""
+    return {
+        "enabled": bool(user.tfa_enabled),
+        "verified": bool(user.tfa_verified),
+        "has_secret": bool(user.tfa_secret),
+        "method": "totp",
+        "configured": bool(user.tfa_enabled and user.tfa_secret),
+    }
+
+
 @router.get("/2fa/setup")
 def setup_2fa(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Generate a new TOTP secret and provisioning URI for 2FA enrollment.

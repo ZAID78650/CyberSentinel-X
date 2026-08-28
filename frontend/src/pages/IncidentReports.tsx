@@ -22,7 +22,7 @@ function TwoFactorGate({ onSuccess, onCancel }: { onSuccess: () => void; onCance
     if (code.length !== 6) return;
     setLoading(true);
     try {
-      await api.post("/api/auth/2fa/verify", { code, action: "verify" });
+      await api.post("/auth/2fa/verify", { code, action: "verify" });
       onSuccess();
     } catch (err: any) {
       // If 2FA isn't set up, allow generation anyway for demo

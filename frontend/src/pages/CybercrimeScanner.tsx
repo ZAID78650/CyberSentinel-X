@@ -569,8 +569,8 @@ export default function CybercrimeScanner() {
     try {
       const res = await api.post(`/v2/scan`, {
         dataset: selectedDataset,
-        limit: 0,
-      }, { timeout: 120000 });
+        limit: 500,
+      }, { timeout: 180000 });
 
       clearInterval(progressInterval);
 
@@ -591,7 +591,15 @@ export default function CybercrimeScanner() {
       });
     } catch (err) {
       clearInterval(progressInterval);
-      setError(getErrorMessage(err));
+      const msg = getErrorMessage(err);
+      // Provide a more helpful error for common backend issues
+      if (msg.includes("Not Found") || msg.includes("404")) {
+        setError("Scanner endpoint unavailable. The backend may be starting up — please try again in 30 seconds.");
+      } else if (msg.includes("502") || msg.includes("503") || msg.includes("timeout")) {
+        setError("Backend service is temporarily unavailable. Please try again in 30–60 seconds.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setScanning(false);
     }

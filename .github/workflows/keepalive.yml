@@ -18,7 +18,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wake frontend (serves the SPA)
-        run: curl -sf -o /dev/null -m 60 https://cybersentinel-frontend.onrender.com/ || true
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 \
+            https://cybersentinel-frontend.onrender.com/ || echo "000")
+          echo "Frontend: HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "⚠️ Frontend check failed"
+            exit 1
+          fi
 
-      - name: Wake backend (via the frontend proxy, exact browser path)
-        run: curl -sf -o /dev/null -m 120 https://cybersentinel-frontend.onrender.com/health || true
+      - name: Wake backend (via frontend proxy)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 \
+            https://cybersentinel-frontend.onrender.com/health || echo "000")
+          echo "Backend (via proxy): HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "⚠️ Backend check failed"
+            exit 1
+          fi
+
+      - name: Wake backend (direct)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 \
+            https://cybersentinel-backend-t5pv.onrender.com/health || echo "000")
+          echo "Backend (direct): HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "⚠️ Backend direct check failed"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: echo "✅ Keep-alive ping completed at $(date -u)"

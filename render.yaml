@@ -1,41 +1,55 @@
 # CyberSentinel X — Render Blueprint
 # One-click deployment of the full stack (Postgres + FastAPI backend + nginx frontend).
 #
-# How to deploy:
-#   1. Push this repo to GitHub (already done).
-#   2. https://render.com → New → Blueprint → connect the GitHub repo
-#      (ZAID78650/CyberSentinel-X). Render reads this render.yaml, creates the
-#      Postgres database and both web services, and wires the environment.
-#   3. First deploy builds both Docker images (backend/ + frontend/), runs
-#      alembic migrations + idempotent seed on startup, and comes up healthy.
+# ─── HOW TO DEPLOY ───────────────────────────────────────────────────────────
+#   1. Push this repo to GitHub.
+#   2. https://render.com → New → Blueprint → connect the repo (ZAID78650/CyberSentinel-X).
+#   3. Render reads this file, creates the Postgres database + both web services.
+#   4. First deploy builds Docker images, runs alembic migrations + seed on startup.
 #
-# Free-tier notes:
-#   - Persistent disks are NOT available on the free tier, so this blueprint
-#     uses no disk. SOC data (events, alerts, incidents, users) lives in the
-#     managed Postgres database and survives restarts/redeploys. The bundled
-#     UNSW-NB15 sample ships in the image and is restored into the (ephemeral)
-#     uploads dir + manifest automatically on startup, so the demo corpus and
-#     Dataset Scanner survive redeploys. Uploaded CSV files and the local RAG
-#     vector store live on the ephemeral filesystem — upload additional
-#     datasets again after a redeploy if they are missing. Paid plans can
-#     re-add the disk block.
-#   - Free-tier services spin down after ~15 min of inactivity and cold-start
-#     on the next request (first load may take ~30-60s). Bump plans in the
-#     Render dashboard for always-on.
-#   - The public service URLs below are hardcoded because Render's blueprint
-#     validator rejects `fromService.property: url`. If Render assigns a
-#     different URL (name collision), update these values in the dashboard.
+# ─── CUSTOM DOMAIN ───────────────────────────────────────────────────────────
+#   After deployment, add a custom domain in the Render dashboard:
 #
-# Optional env vars you may want to set per service:
-#   - UNSW_DATASET_DIR: absolute path to the UNSW-NB15 CSVs (upload CSVs via
-#     the Data Sources → Upload tab instead — no env needed).
-#   - SMTP_USER / SMTP_PASSWORD / EMAIL_FROM / OPS_EMAIL for email alerts.
-#   - LLM_PROVIDER=openai|gemini + matching API key, if you want the live LLM
-#     agent instead of the deterministic local provider.
+#   1. Frontend service → Settings → Custom Domains → Add
+#      Enter: www.cybersentinel.io (or your domain)
+#      Render gives you a DNS target → update your DNS provider:
+#        CNAME  www  →  cybersentinel-frontend.onrender.com
+#
+#   2. Backend service → Settings → Custom Domains → Add (optional)
+#      Only if you want api.cybersentinel.io pointing directly to the backend.
+#
+#   3. After DNS propagates, update these env vars in the Render dashboard:
+#        Backend:  CORS_ORIGINS  → https://www.cybersentinel.io,https://cybersentinel.io
+#        Backend:  FRONTEND_URL → https://www.cybersentinel.io
+#        Backend:  BACKEND_URL  → https://www.cybersentinel.io (or api.cybersentinel.io)
+#        Frontend: BACKEND_URL  → https://cybersentinel-backend-t5pv.onrender.com
+#
+#   4. Update OAuth redirect URIs in Google/GitHub consoles:
+#        Google: https://www.cybersentinel.io/api/auth/oauth/google/callback
+#        GitHub: https://www.cybersentinel.io/api/auth/oauth/github/callback
+#
+#   5. SSL is auto-provisioned by Render (Let's Encrypt). No manual setup needed.
+#
+# ─── FREE-TIER NOTES ────────────────────────────────────────────────────────
+#   - No persistent disk on free tier. SOC data lives in Postgres (survives redeploys).
+#   - Bundled UNSW-NB15 sample ships in the image and restores on startup.
+#   - Uploaded CSVs + RAG vector store live on ephemeral filesystem (re-upload after redeploy).
+#   - Services spin down after ~15 min inactivity. Cold-start takes ~30-60s.
+#   - GitHub Actions workflow (.github/workflows/keep-alive.yml) pings every 10 min.
+#
+# ─── ENVIRONMENT VARIABLES ───────────────────────────────────────────────────
+#   Required (set in dashboard, not in this file — sync: false):
+#     GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET  — Google OAuth SSO
+#     GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET  — GitHub OAuth SSO
+#
+#   Optional:
+#     LLM_PROVIDER=openai|gemini + API key     — Live LLM agent (default: local)
+#     SMTP_HOST / SMTP_USER / SMTP_PASSWORD     — Email alerts
+#     UNSW_DATASET_DIR                          — Path to UNSW-NB15 CSVs
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
-  # ---------------------------------------------------------------------------
-  # Backend — FastAPI + gunicorn/uvicorn, Postgres, alembic migrations + seed
-  # ---------------------------------------------------------------------------
+  # ─── Backend ────────────────────────────────────────────────────────────────
   - type: web
     name: cybersentinel-backend
     runtime: docker
@@ -43,14 +57,19 @@ services:
     plan: free
     dockerfilePath: backend/Dockerfile
     envVars:
+      # Database
       - key: DATABASE_URL
         fromDatabase:
           name: cybersentinel-postgres
           property: connectionString
+
+      # Server
       - key: PORT
         value: "8000"
       - key: WEB_CONCURRENCY
-        value: "1"  # free tier has 512 MB RAM — 1 worker leaves headroom for bulk ingestion
+        value: "1"  # free tier: 512 MB RAM — 1 worker for headroom
+
+      # Authentication
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -61,52 +80,65 @@ services:
         value: "30"
       - key: REFRESH_TOKEN_EXPIRE_DAYS
         value: "7"
+
+      # ML / LLM
       - key: LLM_PROVIDER
         value: local
-      - key: ENVIRONMENT
-        value: production
-      - key: LOG_LEVEL
-        value: INFO
       - key: VECTOR_DB_BACKEND
         value: local
       - key: VECTOR_DB_PATH
         value: /app/data/vector_store
+
+      # Data
       - key: DATASET_UPLOAD_DIR
         value: /app/data/uploads
-      - key: CORS_ORIGINS
-        value: https://cybersentinel-frontend.onrender.com
-      - key: FRONTEND_URL
-        value: https://cybersentinel-frontend.onrender.com
-      - key: BACKEND_URL
-        # Public backend origin — the OAuth redirect_uri is built from this.
-        # Without it, SSO would redirect the browser to localhost:8000.
-        value: https://cybersentinel-backend-t5pv.onrender.com
-      # Google / GitHub OAuth (SSO). Create an OAuth app per provider and set
-      # the values in the Render dashboard (sync: false = not overwritten by
-      # this blueprint). Register these exact redirect URIs with the provider
-      # (they must be on the FRONTEND origin — /api is proxied to this backend,
-      # so the CSRF state cookie, set on the frontend host, reaches the
-      # callback only if the provider redirects the browser back there):
-      #   Google:  https://cybersentinel-frontend.onrender.com/api/auth/oauth/google/callback
-      #   GitHub:  https://cybersentinel-frontend.onrender.com/api/auth/oauth/github/callback
-      # See docs/OAUTH_SETUP.md for the full walkthrough.
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: GITHUB_CLIENT_ID
-        sync: false
-      - key: GITHUB_CLIENT_SECRET
-        sync: false
       - key: UNSW_DATASET_DIR
         value: ""
       - key: UNSW_INGEST_LIMIT
         value: "0"
+
+      # CORS — update after custom domain is live
+      # Default: allows the Render frontend subdomain
+      # After custom domain: add your domain, comma-separated
+      - key: CORS_ORIGINS
+        value: https://cybersentinel-frontend.onrender.com
+        # sync: false  # uncomment to set manually in dashboard
+        # Example: https://www.cybersentinel.io,https://cybersentinel.io
+
+      # Frontend URL — used for OAuth redirects and email links
+      - key: FRONTEND_URL
+        value: https://cybersentinel-frontend.onrender.com
+        # After custom domain: https://www.cybersentinel.io
+
+      # Backend public URL — used for OAuth redirect_uri construction
+      - key: BACKEND_URL
+        value: https://cybersentinel-backend-t5pv.onrender.com
+        # After custom domain: https://www.cybersentinel.io (or api.cybersentinel.io)
+
+      # App config
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+
+      # Google OAuth (set in Render dashboard, not in this file)
+      # Redirect URI: https://<FRONTEND_URL>/api/auth/oauth/google/callback
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+      # GitHub OAuth (set in Render dashboard, not in this file)
+      # Redirect URI: https://<FRONTEND_URL>/api/auth/oauth/github/callback
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+
     healthCheckPath: /health
     autoDeploy: true
-  # ---------------------------------------------------------------------------
-  # Frontend — static build served by nginx, proxying /api + /ws to the backend
-  # ---------------------------------------------------------------------------
+
+  # ─── Frontend ───────────────────────────────────────────────────────────────
   - type: web
     name: cybersentinel-frontend
     runtime: docker
@@ -116,13 +148,16 @@ services:
     envVars:
       - key: PORT
         value: "80"
+
+      # Backend URL for nginx reverse proxy (internal Docker network)
+      # This is the INTERNAL backend service URL, not the public one
       - key: BACKEND_URL
         value: https://cybersentinel-backend-t5pv.onrender.com
+
     healthCheckPath: /healthz
     autoDeploy: true
-# ---------------------------------------------------------------------------
-# Managed PostgreSQL
-# ---------------------------------------------------------------------------
+
+# ─── Managed PostgreSQL ──────────────────────────────────────────────────────
 databases:
   - name: cybersentinel-postgres
     plan: free

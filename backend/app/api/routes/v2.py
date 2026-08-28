@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/v2", tags=["CyberSentinel V2"])
 
 # Lazy import — FEATURE_COLUMNS is loaded on first use so the v2 router
 # can register even when heavy ML deps (numpy, xgboost, lightgbm) are slow
-to install or missing.
+# to install or missing.
 def _get_feature_columns():
     from app.services.ml_engine import FEATURE_COLUMNS as _FC
     return _FC

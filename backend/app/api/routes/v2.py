@@ -32,24 +32,9 @@ router = APIRouter(prefix="/api/v2", tags=["CyberSentinel V2"])
 # Lazy import — FEATURE_COLUMNS is loaded on first use so the v2 router
 # can register even when heavy ML deps (numpy, xgboost, lightgbm) are slow
 to install or missing.
-def _feature_columns():
+def _get_feature_columns():
     from app.services.ml_engine import FEATURE_COLUMNS as _FC
     return _FC
-
-# Module-level alias kept for backward compat; evaluated lazily via a
-class _LazyList:
-    """Proxy that defers list import to first element access."""
-    _inner = None
-    def _load(self):
-        if self._inner is None:
-            self._inner = _feature_columns()
-        return self._inner
-    def __getitem__(self, idx): return self._load()[idx]
-    def __len__(self): return len(self._load())
-    def __iter__(self): return iter(self._load())
-    def __bool__(self): return True
-
-FEATURE_COLUMNS = _LazyList()  # type: ignore[assignment]
 
 # ─── Lazy-loaded engines ───────────────────────────────────────────────
 _engine = None
@@ -545,7 +530,7 @@ def model_info_v2():
         "performance": perf,
         "feature_importance": {
             "top_features": [{"name": n, "importance": round(v, 4)} for n, v in sorted_features[:15]],
-            "total_features": len(FEATURE_COLUMNS),
+            "total_features": len(_get_feature_columns()),
         },
         "model_info": {
             "classification": {
@@ -573,7 +558,7 @@ def model_info_v2():
             },
             "feature_engineering": {
                 "version": "v3.0",
-                "total_features": len(FEATURE_COLUMNS),
+                "total_features": len(_get_feature_columns()),
                 "feature_groups": ["transaction", "temporal", "geographic", "account", "fraud_pattern", "network", "interaction"],
                 "interaction_features": ["amount_x_velocity", "amount_x_risk", "density_x_velocity", "complaint_age_x_velocity", "account_risk_x_linked"],
                 "cyclical_encoding": "hour_sin, hour_cos, dow_sin, dow_cos (captures circular time patterns)",

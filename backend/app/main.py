@@ -37,7 +37,15 @@ from app.api.routes import (
     ueba,
     websocket,
 )
-from app.api.routes import v2
+try:
+    from app.api.routes import v2
+    V2_AVAILABLE = True
+except Exception as _v2_err:
+    v2 = None  # type: ignore[assignment]
+    V2_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("V2 router unavailable (ML deps not installed): %s", _v2_err)
+
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.logging import setup_logging
@@ -68,6 +76,8 @@ async def lifespan(app: FastAPI):
     auto_detection_task = asyncio.create_task(auto_detection_loop())
 
     # Pre-train V2 ML models on synthetic data for fast predictions
+    if not V2_AVAILABLE:
+        logger.warning("V2 ML engine skipped — xgboost/lightgbm not installed")
     try:
         from app.api.routes.v2 import _retrain_engine
         import threading
@@ -154,7 +164,10 @@ app.include_router(ueba.router)
 app.include_router(simulations.router)
 app.include_router(websocket.router)
 app.include_router(financial.router)
-app.include_router(v2.router)
+if V2_AVAILABLE:
+    app.include_router(v2.router)
+else:
+    logger.warning("V2 router not loaded — ML endpoints unavailable")
 
 
 @app.get("/", include_in_schema=False)

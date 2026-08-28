@@ -3,6 +3,7 @@ node_modules
 dist
 build
 .venv
+.venv310
 __pycache__
 .pytest_cache
 .ruff_cache
@@ -27,8 +28,6 @@ logs/
 .coverage
 .hypothesis/
 htmlcov/
-dist/
-build/
 *.egg-info/
 .mypy_cache/
 .dmypy.json
@@ -37,3 +36,8 @@ Dockerfile
 docker-compose.yml
 README.md
 LICENSE
+start-local.sh
+docs/
+scripts/
+test_*.py
+*.log

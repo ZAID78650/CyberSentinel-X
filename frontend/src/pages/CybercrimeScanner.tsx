@@ -28,6 +28,12 @@ interface ScanProgress {
   elapsed: number;
 }
 
+interface AnomalyIndicator {
+  type: string;
+  description: string;
+  severity: string;
+}
+
 interface ScanResult {
   scan_id: string;
   status: string;
@@ -55,6 +61,16 @@ interface ScanResult {
     unique_ips: number;
     unique_domains: number;
     mitre_techniques: string[];
+    anomaly_indicators?: AnomalyIndicator[];
+    risk_score?: number;
+    data_stats?: {
+      total_columns: number;
+      numeric_columns: number;
+      categorical_columns: number;
+      total_rows: number;
+      matched_rows: number;
+      match_rate: number;
+    };
   };
   ml_analysis: Record<string, unknown>;
   scan_time_ms: number;
@@ -452,6 +468,48 @@ function ScanResults({ result, onNavigateToMap, onNavigateToAlerts }: {
                 {e.mitre_techniques.slice(0, 8).map((t) => (
                   <span key={t} className="rounded bg-cyber-red/10 px-2 py-0.5 font-mono text-[9px] text-cyber-red">{t}</span>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Anomaly Indicators from real analysis */}
+          {e.anomaly_indicators && e.anomaly_indicators.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Analysis Findings</p>
+              <div className="space-y-1.5">
+                {e.anomaly_indicators.map((ind, i) => {
+                  const sevColor = ind.severity === "HIGH" ? "#f87171" : ind.severity === "MEDIUM" ? "#facc15" : "#38bdf8";
+                  return (
+                    <div key={i} className="flex items-start gap-2 rounded-md bg-night-850/60 px-3 py-2">
+                      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: sevColor }} />
+                      <div>
+                        <p className="text-[11px] text-slate-300">{ind.description}</p>
+                        <p className="text-[9px] uppercase tracking-wider" style={{ color: sevColor }}>{ind.severity} · {ind.type}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Data Stats from actual analysis */}
+          {e.data_stats && (
+            <div className="mt-4">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Dataset Profile</p>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-md bg-night-850/60 px-2 py-1.5 text-center">
+                  <p className="font-mono text-xs font-bold text-electric-400">{e.data_stats.total_columns}</p>
+                  <p className="text-[9px] text-slate-500">Columns</p>
+                </div>
+                <div className="rounded-md bg-night-850/60 px-2 py-1.5 text-center">
+                  <p className="font-mono text-xs font-bold text-cyber-green">{e.data_stats.numeric_columns}</p>
+                  <p className="text-[9px] text-slate-500">Numeric</p>
+                </div>
+                <div className="rounded-md bg-night-850/60 px-2 py-1.5 text-center">
+                  <p className="font-mono text-xs font-bold text-cyber-purple">{e.data_stats.match_rate}%</p>
+                  <p className="text-[9px] text-slate-500">Match Rate</p>
+                </div>
               </div>
             </div>
           )}

@@ -2,150 +2,270 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme CSS Variables ── */
 :root {
-  --bg-primary: #0c1322;
-  --bg-secondary: #0f172a;
-  --bg-tertiary: #131d33;
-  --bg-card: rgba(15, 23, 42, 0.8);
-  --bg-card-hover: rgba(19, 29, 51, 0.9);
-  --border-primary: #1e2d4a;
-  --border-secondary: #2a3f5f;
-  --border-accent: rgba(59, 130, 246, 0.3);
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-blue: #3b82f6;
-  --accent-cyan: #06b6d4;
-  --accent-purple: #8b5cf6;
-  --accent-green: #22c55e;
-  --accent-amber: #f59e0b;
-  --accent-orange: #f97316;
-  --accent-red: #ef4444;
-  --sidebar-width: 260px;
-  --sidebar-collapsed-width: 64px;
-  --topbar-height: 56px;
+  --surface: #ffffff;
+  --surface-alt: #f8fafc;
+  --surface-raised: #f1f5f9;
+  --surface-border: #e2e8f0;
+  --surface-border-strong: #cbd5e1;
+  --on-surface: #0f172a;
+  --on-surface-muted: #475569;
+  --on-surface-faint: #94a3b8;
+  --chart-grid: #e2e8f0;
+  --chart-grid-alt: #f1f5f9;
+}
+
+.dark {
+  --surface: #0a101f;
+  --surface-alt: #0d1526;
+  --surface-raised: #111a30;
+  --surface-border: #1a2540;
+  --surface-border-strong: #253352;
+  --on-surface: #f1f5f9;
+  --on-surface-muted: #94a3b8;
+  --on-surface-faint: #475569;
+  --chart-grid: #1a2540;
+  --chart-grid-alt: #111a30;
 }
 
 @layer base {
   html {
     @apply antialiased;
+    @apply bg-night-950 text-slate-200;
   }
+  .light html,
+  .light {
+    @apply bg-white text-slate-900;
+  }
+
   body {
     @apply min-h-screen font-sans;
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
     background-image:
-      radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
-      radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.04) 0%, transparent 50%);
+      linear-gradient(rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+      radial-gradient(1200px 600px at 20% -10%, rgba(14, 165, 233, 0.12), transparent 60%),
+      radial-gradient(1000px 500px at 90% 110%, rgba(167, 139, 250, 0.1), transparent 60%);
+    background-size: 44px 44px, 44px 44px, 100% 100%, 100% 100%;
     background-attachment: fixed;
+    background-color: var(--surface);
   }
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-thumb { @apply rounded-full; background: var(--border-secondary); }
-  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::selection { background: rgba(59, 130, 246, 0.3); color: white; }
+  .dark body {
+    background-image:
+      linear-gradient(rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+      radial-gradient(1200px 600px at 20% -10%, rgba(14, 165, 233, 0.12), transparent 60%),
+      radial-gradient(1000px 500px at 90% 110%, rgba(167, 139, 250, 0.1), transparent 60%);
+  }
+  .light body {
+    background-image:
+      linear-gradient(rgba(14, 165, 233, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(14, 165, 233, 0.04) 1px, transparent 1px),
+      radial-gradient(1200px 600px at 20% -10%, rgba(14, 165, 233, 0.06), transparent 60%),
+      radial-gradient(1000px 500px at 90% 110%, rgba(167, 139, 250, 0.05), transparent 60%);
+    background-color: #ffffff;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded;
+    background: var(--surface-border-strong);
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
 }
 
 @layer components {
-  .intel-card {
-    @apply rounded-xl border transition-all duration-200;
-    background: var(--bg-card);
-    border-color: var(--border-primary);
+  /* ── Glass card ── */
+  .glass {
+    @apply rounded-xl border shadow-panel backdrop-blur;
+    border-color: var(--surface-border);
+    background: var(--surface-alt);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+  }
+  .dark .glass {
+    border-color: var(--surface-border);
+    background: var(--surface-alt);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    background-color: rgba(13, 21, 38, 0.7);
     backdrop-filter: blur(12px);
   }
-  .intel-card:hover {
-    border-color: var(--border-secondary);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+
+  .glass-hover {
+    @apply transition-all duration-200;
   }
-  .glass {
-    @apply rounded-xl border backdrop-blur-md;
-    background: rgba(15, 23, 42, 0.7);
-    border-color: var(--border-primary);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-  }
-  .glass-hover { @apply transition-all duration-200; }
   .glass-hover:hover {
-    border-color: rgba(59, 130, 246, 0.3);
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.08);
+    border-color: rgba(14, 165, 233, 0.5);
+    box-shadow: 0 0 24px rgba(14, 165, 233, 0.15);
   }
+
   .kpi-value {
-    @apply font-mono text-3xl font-bold tracking-tight;
-    font-variant-numeric: tabular-nums;
+    @apply font-mono text-3xl font-semibold tracking-tight;
   }
+
   .nav-item {
-    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150;
-    color: var(--text-secondary);
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors;
+    color: var(--on-surface-muted);
   }
-  .nav-item:hover { background: rgba(59, 130, 246, 0.08); color: var(--text-primary); }
+  .dark .nav-item {
+    color: #94a3b8;
+  }
+  .light .nav-item {
+    color: #475569;
+  }
+  .nav-item:hover {
+    background: var(--surface-raised);
+    color: var(--on-surface);
+  }
   .nav-item.active {
-    background: rgba(59, 130, 246, 0.12);
-    color: var(--accent-blue);
-    box-shadow: inset 3px 0 0 var(--accent-blue);
+    @apply shadow-glow;
+    background: rgba(14, 165, 233, 0.1);
+    color: #0ea5e9;
   }
+
   .badge {
-    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-2xs font-semibold;
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
   }
+
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50;
   }
-  .btn-primary { @apply btn bg-intel-blue text-white hover:bg-blue-500; }
-  .btn-primary:hover { box-shadow: 0 0 24px rgba(59, 130, 246, 0.3); }
-  .btn-ghost { @apply btn border text-slate-300; border-color: var(--border-primary); }
-  .btn-ghost:hover { border-color: var(--border-accent); color: white; background: rgba(59, 130, 246, 0.08); }
-  .btn-danger { @apply btn bg-red-500/90 text-white hover:bg-red-500; }
-  .btn-sm { @apply px-3 py-1.5 text-xs; }
+  .btn-primary {
+    @apply btn bg-electric-500 text-white hover:bg-electric-400 hover:shadow-glow;
+  }
+  .btn-ghost {
+    @apply btn border text-slate-300;
+    border-color: var(--surface-border);
+  }
+  .dark .btn-ghost {
+    color: #cbd5e1;
+  }
+  .light .btn-ghost {
+    color: #475569;
+  }
+  .btn-ghost:hover {
+    border-color: rgba(14, 165, 233, 0.5);
+    color: white;
+  }
+  .light .btn-ghost:hover {
+    color: #0f172a;
+  }
+  .btn-danger {
+    @apply btn bg-cyber-red/90 text-white hover:bg-cyber-red;
+  }
+
   .input {
-    @apply w-full rounded-lg px-3.5 py-2.5 text-sm outline-none transition-all duration-150;
-    border: 1px solid var(--border-primary);
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
+    @apply w-full rounded-lg px-3.5 py-2.5 text-sm outline-none transition;
+    border: 1px solid var(--surface-border);
+    background: var(--surface-raised);
+    color: var(--on-surface);
   }
-  .input::placeholder { color: var(--text-muted); }
-  .input:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
-  .label { @apply mb-1.5 block text-xs font-semibold uppercase tracking-wider; color: var(--text-muted); }
-  .table-base { @apply w-full text-left text-sm; }
+  .dark .input {
+    color: #f1f5f9;
+  }
+  .input::placeholder {
+    color: var(--on-surface-faint);
+  }
+  .input:focus {
+    border-color: #0ea5e9;
+    box-shadow: 0 0 24px rgba(14, 165, 233, 0.15);
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wider;
+    color: var(--on-surface-faint);
+  }
+
+  .table-base {
+    @apply w-full text-left text-sm;
+  }
   .table-base thead th {
-    @apply border-b px-4 py-3 text-2xs font-semibold uppercase tracking-wider;
-    border-color: var(--border-primary); color: var(--text-muted);
+    @apply border-b px-4 py-3 text-xs font-semibold uppercase tracking-wider;
+    border-color: var(--surface-border);
+    color: var(--on-surface-faint);
   }
-  .table-base tbody td { @apply border-b px-4 py-3; border-color: var(--border-primary); }
-  .table-base tbody tr { @apply transition-colors duration-150; }
-  .table-base tbody tr:hover { background: rgba(59, 130, 246, 0.04); }
-  .skeleton { @apply animate-pulse rounded-md; background: var(--bg-tertiary); }
-  .drawer-panel {
-    @apply fixed inset-y-0 right-0 z-50 w-full max-w-lg border-l overflow-y-auto;
-    background: var(--bg-secondary); border-color: var(--border-primary);
+  .table-base tbody td {
+    @apply border-b px-4 py-3;
+    border-color: var(--surface-border);
   }
-  .cmd-panel {
-    @apply w-full max-w-xl rounded-xl border overflow-hidden;
-    background: var(--bg-secondary); border-color: var(--border-secondary);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  .table-base tbody tr {
+    @apply transition-colors;
+  }
+  .dark .table-base tbody tr:hover {
+    background: rgba(17, 26, 48, 0.4);
+  }
+  .light .table-base tbody tr:hover {
+    background: rgba(241, 245, 249, 0.8);
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded-md;
+    background: var(--surface-raised);
   }
 }
 
 @layer utilities {
-  .text-gradient-blue { @apply bg-clip-text text-transparent; background-image: linear-gradient(135deg, #3b82f6, #06b6d4); }
-  .text-gradient-intel { @apply bg-clip-text text-transparent; background-image: linear-gradient(135deg, #3b82f6, #8b5cf6); }
+  .animate-pulse-slow {
+    animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .animate-pulse-slower {
+    animation: pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .bg-soc-grid {
+    background-image:
+      linear-gradient(rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
 }
 
-.react-flow { background: transparent !important; }
-.react-flow__edge-path { stroke: var(--border-secondary); stroke-width: 1.6; }
-.react-flow__edge.selected .react-flow__edge-path { stroke: var(--accent-blue); }
+/* React Flow dark theme */
+.react-flow {
+  background: transparent;
+}
+.react-flow__node {
+  font-family: inherit;
+}
+.react-flow__edge-path {
+  stroke: #334155;
+  stroke-width: 1.6;
+}
+.light .react-flow__edge-path {
+  stroke: #94a3b8;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #38bdf8;
+}
 .react-flow__controls {
-  box-shadow: none !important; border-radius: 10px !important; overflow: hidden;
-  border: 1px solid var(--border-primary) !important; background: var(--bg-secondary) !important;
+  box-shadow: none;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #1a2540;
+}
+.light .react-flow__controls {
+  border-color: #e2e8f0;
 }
 .react-flow__controls button {
-  background: var(--bg-secondary) !important; color: var(--text-secondary) !important;
-  border-bottom-color: var(--border-primary) !important;
+  background: #0d1526;
+  color: #94a3b8;
+  border-bottom: 1px solid #1a2540;
 }
-.react-flow__controls button:hover { background: var(--bg-tertiary) !important; }
-.react-flow__attribution { background: transparent !important; }
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+.light .react-flow__controls button {
+  background: #ffffff;
+  color: #475569;
+  border-bottom-color: #e2e8f0;
+}
+.react-flow__controls button:hover {
+  background: #111a30;
+}
+.light .react-flow__controls button:hover {
+  background: #f1f5f9;
+}
+.react-flow__attribution {
+  background: transparent;
+  color: #334155;
 }

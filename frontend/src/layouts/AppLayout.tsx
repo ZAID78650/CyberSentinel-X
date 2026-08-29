@@ -1,384 +1,270 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  Activity, AlertTriangle, BarChart3, Bell, Brain, Bug,
-  ChevronLeft, ChevronRight, Database, FileText, Gauge,
-  Globe, LayoutDashboard, LogOut, Map, Menu, Microscope,
-  Network, Radar, Search, Settings, Shield, TrendingUp,
-  UserCog, Users, Zap, X,
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Bell,
+  Boxes,
+  Brain,
+  Bug,
+  Cpu,
+  Database,
+  Dna,
+  FileText,
+  Fingerprint,
+  Gauge,
+  GitBranch,
+  Globe,
+  LayoutDashboard,
+  LogOut,
+  Map,
+  Menu,
+  Microscope,
+  Network,
+  Radar,
+  Search,
+  Settings,
+  Shield,
+  ShieldCheck,
+  ShieldHalf,
+  TrendingUp,
+  UserCog,
+  Users,
+  X,
+  Zap,
 } from "lucide-react";
 import { Logo } from "../components/Logo";
-import { CommandPalette } from "../components/CommandPalette";
 import { useAuth } from "../contexts/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { isDemoMode } from "../services/api";
 import { useTheme } from "../contexts/ThemeContext";
+import { Moon, Sun } from "lucide-react";
 
-/* ── Navigation Structure ────────────────────────────────────────────── */
-
-interface NavItem {
-  to: string;
-  label: string;
-  icon: ReactNode;
-  badge?: string;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const CORE_NAV: NavGroup[] = [
+const NAV_GROUPS: Array<{ label: string; items: Array<{ to: string; label: string; icon: ReactNode }> }> = [
   {
-    label: "OVERVIEW",
+    label: "Command Center",
     items: [
-      { to: "/dashboard", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
+      { to: "/dashboard", label: "Overview", icon: <LayoutDashboard className="h-4 w-4" /> },
+      { to: "/cybercrime-scanner", label: "Cybercrime Scanner", icon: <Bug className="h-4 w-4" /> },
+      { to: "/sih-demo", label: "SIH Demo Mode", icon: <Zap className="h-4 w-4" /> },
     ],
   },
   {
-    label: "INTELLIGENCE",
+    label: "Financial Intelligence",
     items: [
-      { to: "/cybercrime-scanner", label: "Scanner", icon: <Bug className="h-4 w-4" /> },
-      { to: "/financial-intelligence", label: "Complaints", icon: <FileText className="h-4 w-4" /> },
-      { to: "/predictive-alerts", label: "Transactions", icon: <TrendingUp className="h-4 w-4" /> },
-      { to: "/model-performance", label: "Predictions", icon: <Brain className="h-4 w-4" /> },
+      { to: "/financial-intelligence", label: "Financial Intel", icon: <TrendingUp className="h-4 w-4" /> },
+      { to: "/predictive-alerts", label: "Predictive Intelligence", icon: <Brain className="h-4 w-4" /> },
+      { to: "/gis-heatmap", label: "Risk Heatmap", icon: <Map className="h-4 w-4" /> },
+      { to: "/threat-globe", label: "Threat Globe", icon: <Globe className="h-4 w-4" /> },
+      { to: "/entity-network", label: "Entity Network", icon: <Network className="h-4 w-4" /> },
     ],
   },
   {
-    label: "ANALYTICS",
+    label: "Alerts & Incidents",
     items: [
-      { to: "/gis-heatmap", label: "Heatmap", icon: <Map className="h-4 w-4" /> },
-      { to: "/entity-network", label: "Network", icon: <Network className="h-4 w-4" /> },
+      { to: "/alerts", label: "Alerts", icon: <AlertTriangle className="h-4 w-4" /> },
+      { to: "/incidents", label: "Incidents", icon: <ShieldHalf className="h-4 w-4" /> },
+      { to: "/lea-dashboard", label: "LEA Dashboard", icon: <Shield className="h-4 w-4" /> },
+      { to: "/live-events", label: "Live Events", icon: <Radar className="h-4 w-4" /> },
     ],
   },
   {
-    label: "OPERATIONS",
+    label: "Investigation & Cases",
     items: [
-      { to: "/alerts", label: "Alerts", icon: <AlertTriangle className="h-4 w-4" />, badge: "3" },
-      { to: "/investigation", label: "Cases", icon: <Shield className="h-4 w-4" /> },
-      { to: "/incident-reports", label: "Reports", icon: <FileText className="h-4 w-4" /> },
+      { to: "/investigation", label: "Investigation Cases", icon: <Search className="h-4 w-4" /> },
+      { to: "/evidence-ledger", label: "Evidence & Audit", icon: <Boxes className="h-4 w-4" /> },
+      { to: "/incident-reports", label: "Intelligence Reports", icon: <FileText className="h-4 w-4" /> },
     ],
   },
   {
-    label: "SYSTEM",
+    label: "ML & Analytics",
     items: [
-      { to: "/model-performance", label: "Models", icon: <Microscope className="h-4 w-4" /> },
-      { to: "/monitoring", label: "Monitoring", icon: <Activity className="h-4 w-4" /> },
-      { to: "/sih-demo", label: "SIH Demo", icon: <Zap className="h-4 w-4" /> },
+      { to: "/model-performance", label: "Model Performance", icon: <Microscope className="h-4 w-4" /> },
+      { to: "/what-if", label: "What-If Simulator", icon: <Cpu className="h-4 w-4" /> },
+      { to: "/analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
+      { to: "/monitoring", label: "System Monitor", icon: <Activity className="h-4 w-4" /> },
+    ],
+  },
+  {
+    label: "Advanced Modules",
+    items: [
+      { to: "/threat-intelligence", label: "Threat Intel", icon: <Fingerprint className="h-4 w-4" /> },
+      { to: "/risk-overview", label: "Risk Overview", icon: <Gauge className="h-4 w-4" /> },
+      { to: "/attack-dna", label: "Attack DNA", icon: <Dna className="h-4 w-4" /> },
+      { to: "/attack-graph", label: "Attack Graph", icon: <GitBranch className="h-4 w-4" /> },
+      { to: "/campaigns", label: "Campaigns", icon: <Users className="h-4 w-4" /> },
+      { to: "/data-sources", label: "Data Sources", icon: <Database className="h-4 w-4" /> },
+      { to: "/response-center", label: "Response Center", icon: <ShieldCheck className="h-4 w-4" /> },
+      { to: "/malware-analysis", label: "Malware Analysis", icon: <Bug className="h-4 w-4" /> },
     ],
   },
 ];
 
-const ADMIN_GROUP: NavGroup = {
-  label: "ADMIN",
-  items: [
-    { to: "/admin/users", label: "Users", icon: <UserCog className="h-4 w-4" /> },
-  ],
+const ADMIN_NAV_GROUP = {
+  label: "Administration",
+  items: [{ to: "/admin/users", label: "Users", icon: <UserCog className="h-4 w-4" /> }],
 };
 
-/* ── Sidebar ─────────────────────────────────────────────────────────── */
-
-function Sidebar({
-  collapsed,
-  onToggle,
-  mobileOpen,
-  onMobileClose,
-}: {
-  collapsed: boolean;
-  onToggle: () => void;
-  mobileOpen: boolean;
-  onMobileClose: () => void;
-}) {
+function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.roles.includes("ADMIN") ?? false;
-  const groups = isAdmin ? [...CORE_NAV, ADMIN_GROUP] : CORE_NAV;
+  const groups = isAdmin ? [...NAV_GROUPS, ADMIN_NAV_GROUP] : NAV_GROUPS;
 
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
 
-  const sidebarWidth = collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-width)";
-
   return (
     <>
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={onMobileClose} />
-      )}
-
+      {open && <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={onClose} />}
       <aside
-        className="fixed inset-y-0 left-0 z-50 flex flex-col border-r transition-all duration-200"
-        style={{
-          width: sidebarWidth,
-          minWidth: sidebarWidth,
-          borderColor: "var(--border-primary)",
-          background: "var(--bg-secondary)",
-          transform: mobileOpen ? "translateX(0)" : undefined,
-        }}
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r transition-transform backdrop-blur lg:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+        style={{ borderColor: "var(--surface-border)", backgroundColor: "var(--surface)" }}
       >
-        {/* Logo */}
-        <div className="flex h-14 items-center justify-between border-b px-4" style={{ borderColor: "var(--border-primary)" }}>
-          <Logo collapsed={collapsed} />
-          {/* Mobile close */}
-          <button onClick={onMobileClose} className="rounded p-1 hover:bg-white/5 lg:hidden" style={{ color: "var(--text-muted)" }}>
+        <div className="flex h-16 items-center justify-between border-b px-5" style={{ borderColor: "var(--surface-border)" }}>
+          <Logo />
+          <button onClick={onClose} className="text-slate-500 lg:hidden">
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-2 py-3">
+        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
           {groups.map((group) => (
-            <div key={group.label} className="mb-3">
-              {!collapsed && (
-                <p className="mb-1 px-3 text-2xs font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
-                  {group.label}
-                </p>
-              )}
+            <div key={group.label}>
+              <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
+                {group.label}
+              </p>
               {group.items.map((item) => (
                 <NavLink
-                  key={item.to + item.label}
+                  key={item.to}
                   to={item.to}
-                  onClick={onMobileClose}
-                  title={collapsed ? item.label : undefined}
-                  className={({ isActive }) =>
-                    `nav-item ${collapsed ? "justify-center px-0" : ""} ${isActive ? "active" : ""}`
-                  }
+                  onClick={onClose}
+                  className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
                 >
                   {item.icon}
-                  {!collapsed && (
-                    <>
-                      <span className="flex-1 truncate">{item.label}</span>
-                      {item.badge && (
-                        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500/20 px-1.5 text-2xs font-bold text-red-400">
-                          {item.badge}
-                        </span>
-                      )}
-                    </>
-                  )}
+                  {item.label}
                 </NavLink>
               ))}
             </div>
           ))}
         </nav>
 
-        {/* Sidebar footer */}
-        <div className="border-t px-2 py-2" style={{ borderColor: "var(--border-primary)" }}>
-          {/* Settings */}
-          <NavLink
-            to="/settings"
-            onClick={onMobileClose}
-            title={collapsed ? "Settings" : undefined}
-            className={({ isActive }) => `nav-item ${collapsed ? "justify-center px-0" : ""} ${isActive ? "active" : ""}`}
-          >
+        <div className="border-t p-3" style={{ borderColor: "var(--surface-border)" }}>
+          <NavLink to="/settings" onClick={onClose} className="nav-item">
             <Settings className="h-4 w-4" />
-            {!collapsed && <span>Settings</span>}
+            Settings
           </NavLink>
-
-          {/* User card */}
-          {!collapsed && (
-            <div className="mt-2 flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: "var(--bg-tertiary)" }}>
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: "linear-gradient(135deg, #3b82f6, #8b5cf6)" }}>
-                {(user?.full_name ?? "A").slice(0, 1).toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{user?.full_name}</p>
-                <p className="truncate text-2xs" style={{ color: "var(--text-muted)" }}>
-                  {user?.roles?.[0] ?? "User"}
-                  {user?.oauth_provider ? ` · ${user.oauth_provider}` : ""}
-                </p>
-              </div>
-              <button onClick={handleLogout} title="Log out" className="rounded p-1 transition-colors hover:bg-white/5 hover:text-red-400" style={{ color: "var(--text-muted)" }}>
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Collapsed user avatar */}
-          {collapsed && (
-            <button onClick={handleLogout} title="Log out" className="mx-auto mt-2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: "linear-gradient(135deg, #3b82f6, #8b5cf6)" }}>
+          <div className="mt-2 flex items-center gap-3 rounded-lg px-3 py-2.5" style={{ background: "var(--surface-raised)" }}>
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-electric-500 to-cyber-purple text-xs font-bold text-white">
               {(user?.full_name ?? "A").slice(0, 1).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold" style={{ color: "var(--on-surface)" }}>{user?.full_name}</p>
+              <p className="truncate text-[10px]" style={{ color: "var(--on-surface-faint)" }}>
+                {user?.roles.join(", ")}
+                {user?.oauth_provider
+                  ? ` · via ${user.oauth_provider.charAt(0).toUpperCase() + user.oauth_provider.slice(1)}`
+                  : ""}
+              </p>
+            </div>
+            <button onClick={handleLogout} title="Log out" className="text-slate-500 hover:text-cyber-red">
+              <LogOut className="h-4 w-4" />
             </button>
-          )}
+          </div>
         </div>
-
-        {/* Collapse toggle (desktop only) */}
-        <button
-          onClick={onToggle}
-          className="hidden lg:flex absolute -right-3 top-20 z-50 h-6 w-6 items-center justify-center rounded-full border"
-          style={{ borderColor: "var(--border-primary)", background: "var(--bg-secondary)", color: "var(--text-muted)" }}
-        >
-          {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
-        </button>
       </aside>
     </>
   );
 }
 
-/* ── Top Bar ─────────────────────────────────────────────────────────── */
-
-function TopBar({
-  onMobileMenu,
-  onOpenCmdPalette,
-}: {
-  onMobileMenu: () => void;
-  onOpenCmdPalette: () => void;
-}) {
+function TopBar({ onMenu }: { onMenu: () => void }) {
   const { connected } = useWebSocket();
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState("");
+  const groups = (user?.roles.includes("ADMIN") ?? false) ? [...NAV_GROUPS, ADMIN_NAV_GROUP] : NAV_GROUPS;
+  const pageTitle = groups.flatMap((g) => g.items).find((i) => i.to === location.pathname)?.label ?? "Console";
   const demoMode = isDemoMode();
 
-  // Derive page title from route
-  const pageTitles: Record<string, string> = {
-    "/dashboard": "Dashboard",
-    "/cybercrime-scanner": "Scanner",
-    "/financial-intelligence": "Complaints",
-    "/predictive-alerts": "Transactions",
-    "/model-performance": "Predictions",
-    "/gis-heatmap": "Heatmap",
-    "/entity-network": "Network",
-    "/alerts": "Alerts",
-    "/investigation": "Cases",
-    "/incident-reports": "Reports",
-    "/monitoring": "Monitoring",
-    "/sih-demo": "SIH Demo Mode",
-    "/admin/users": "User Management",
-    "/settings": "Settings",
+  const submitSearch = () => {
+    const q = searchQuery.trim();
+    if (q) {
+      navigate(`/search?q=${encodeURIComponent(q)}`);
+    } else {
+      navigate("/search");
+    }
   };
-  const pageTitle = pageTitles[location.pathname] ?? "Console";
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b px-4 backdrop-blur-md lg:px-5" style={{ borderColor: "var(--border-primary)", background: "rgba(12, 19, 34, 0.85)" }}>
-      {/* Mobile menu */}
-      <button onClick={onMobileMenu} className="rounded-lg p-1.5 hover:bg-white/5 lg:hidden" style={{ color: "var(--text-secondary)" }}>
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b px-5 backdrop-blur" style={{ borderColor: "var(--surface-border)", backgroundColor: "var(--surface)" }}>
+      <button onClick={onMenu} className="text-slate-400 hover:text-white lg:hidden">
         <Menu className="h-5 w-5" />
       </button>
+      <div className="hidden flex-1 md:block">
+        <h1 className="text-sm font-bold uppercase tracking-wider" style={{ color: "var(--on-surface)" }}>{pageTitle}</h1>
+      </div>
 
-      {/* Page title */}
-      <h1 className="text-sm font-bold tracking-wide" style={{ color: "var(--text-primary)" }}>
-        {pageTitle}
-      </h1>
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Global search trigger */}
-      <button
-        onClick={onOpenCmdPalette}
-        className="flex items-center gap-2 rounded-lg border px-3 py-1.5 transition-colors hover:border-[var(--border-accent)]"
-        style={{ borderColor: "var(--border-primary)", color: "var(--text-muted)" }}
+      <form
+        className="hidden items-center gap-2 rounded-lg border px-3 py-1.5 md:flex"
+        onSubmit={(e) => { e.preventDefault(); submitSearch(); }}
       >
-        <Search className="h-3.5 w-3.5" />
-        <span className="hidden text-xs md:inline">Search...</span>
-        <kbd className="hidden rounded border px-1.5 py-0.5 text-2xs md:inline" style={{ borderColor: "var(--border-primary)" }}>⌘K</kbd>
-      </button>
+        <Search className="h-3.5 w-3.5" style={{ color: "var(--on-surface-faint)" }} />
+        <input
+          className="w-48 bg-transparent text-xs focus:outline-none"
+          placeholder="Search complaints, zones, alerts…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+        <button type="submit" className="text-[10px] font-semibold uppercase text-electric-400 hover:underline">Go</button>
+      </form>
 
-      {/* Data mode indicator */}
-      {demoMode ? (
-        <div className="mode-demo">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-2xs font-semibold text-amber-400">DEMO</span>
-        </div>
-      ) : connected ? (
-        <div className="mode-live">
-          <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-2xs font-semibold text-green-400">LIVE</span>
-        </div>
-      ) : (
-        <div className="mode-offline">
-          <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-          <span className="text-2xs font-semibold text-slate-400">OFFLINE</span>
-        </div>
-      )}
+      <div className="flex items-center gap-1.5 rounded-full border px-3 py-1" style={{ borderColor: demoMode ? "var(--border-warning, #f59e0b)" : connected ? "rgba(34,197,94,0.3)" : "rgba(234,179,8,0.3)", background: demoMode ? "rgba(245,158,11,0.1)" : connected ? "rgba(34,197,94,0.1)" : "rgba(234,179,8,0.1)" }}>
+        <span className={`h-2 w-2 rounded-full animate-pulse`} style={{ background: demoMode ? "#f59e0b" : connected ? "#22c55e" : "#eab308" }} />
+        <span className="text-[11px] font-semibold" style={{ color: demoMode ? "#f59e0b" : connected ? "#22c55e" : "#eab308" }}>{demoMode ? "DEMO MODE" : connected ? "REAL-TIME" : "CONNECTING"}</span>
+      </div>
 
-      {/* Theme toggle */}
       <button
         onClick={toggleTheme}
-        className="rounded-lg p-1.5 transition-colors hover:bg-white/5"
-        style={{ color: "var(--text-secondary)" }}
+        className="rounded-lg p-2 transition-colors"
+        style={{ color: "var(--on-surface-muted)" }}
         title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       >
-        {theme === "dark" ? "☀️" : "🌙"}
+        {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
       </button>
 
-      {/* Notifications */}
-      <button className="relative rounded-lg p-1.5 transition-colors hover:bg-white/5" style={{ color: "var(--text-secondary)" }} title="Notifications">
-        <Bell className="h-4.5 w-4.5" />
-        <span className="absolute right-0.5 top-0.5 flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+      <button className="relative" style={{ color: "var(--on-surface-muted)" }} title="Notifications">
+        <Bell className="h-5 w-5" />
+        <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyber-red opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-cyber-red" />
         </span>
       </button>
-
-      {/* System status */}
-      <div className="hidden items-center gap-2 xl:flex">
-        <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-        <span className="text-2xs font-medium" style={{ color: "var(--text-muted)" }}>SYSTEM OK</span>
-      </div>
     </header>
   );
 }
 
-/* ── Main Layout ─────────────────────────────────────────────────────── */
-
 export default function AppLayout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem("csx-sidebar-collapsed") === "true";
-    } catch {
-      return false;
-    }
-  });
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [cmdOpen, setCmdOpen] = useState(false);
-
-  // Persist sidebar state
-  useEffect(() => {
-    try {
-      localStorage.setItem("csx-sidebar-collapsed", String(sidebarCollapsed));
-    } catch {}
-  }, [sidebarCollapsed]);
-
-  // CMD+K keyboard shortcut
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setCmdOpen((prev) => !prev);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-
-  const sidebarWidth = sidebarCollapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-width)";
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div className="min-h-screen">
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed((p) => !p)}
-        mobileOpen={mobileOpen}
-        onMobileClose={() => setMobileOpen(false)}
-      />
-
-      <div className="flex min-h-screen flex-col transition-all duration-200" style={{ marginLeft: sidebarWidth }}>
-        <TopBar
-          onMobileMenu={() => setMobileOpen(true)}
-          onOpenCmdPalette={() => setCmdOpen(true)}
-        />
-        <main className="flex-1 p-4 lg:p-5">
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <div className="flex min-h-screen flex-col lg:pl-64">
+        <TopBar onMenu={() => setSidebarOpen(true)} />
+        <main className="flex-1 p-5 lg:p-6">
           <Outlet />
         </main>
-        <footer className="border-t px-6 py-3 text-center text-2xs" style={{ borderColor: "var(--border-primary)", color: "var(--text-muted)" }}>
-          CyberSentinel-X · Predictive Cybercrime Intelligence · SIH 2026 (SIH26184)
+        <footer className="border-t border-night-700/70 px-6 py-3 text-center text-[11px] text-slate-600">
+          CyberSentinel X · Predictive Financial Cybercrime Intelligence · SIH 2026 (SIH26184)
         </footer>
       </div>
-
-      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
     </div>
   );
 }

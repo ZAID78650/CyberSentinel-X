@@ -1,5 +1,4 @@
-import { Suspense } from "react";
-import { lazyWithRetry as lazy } from "./lazyWithRetry";
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./layouts/AppLayout";
 import { useAuth } from "./contexts/AuthContext";

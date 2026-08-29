@@ -1,58 +1,73 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
-  Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  AlertTriangle, Bot, Brain, ChevronRight, DollarSign, FileText as FileTextIcon, Loader2, MapPin, PlayCircle, Radar,
-  ShieldCheck, ShieldHalf, Siren, Target, TrendingUp, Zap,
+  AlertTriangle, Brain, ChevronRight, FileText as FileTextIcon, Globe,
+  Loader2, MapPin, PlayCircle, Radar, ShieldCheck, ShieldHalf,
+  Siren, Target, TrendingUp, Zap, Bot,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { useSocket } from "../contexts/WebSocketContext";
 import { useToast } from "../components/ui/Toast";
 import { AccuracyGauge, Card, EmptyState, SeverityBadge, Skeleton, StatCard, StatusBadge } from "../components/ui";
-import ThreatSpace3D from "../components/charts/ThreatSpace3D";
-import AttackBar3D from "../components/charts/AttackBar3D";
-import EventFlowChart from "../components/charts/EventFlowChart";
 import type { DashboardSummary, SecurityEvent } from "../types";
 import { useAuth } from "../contexts/AuthContext";
-import { useTheme } from "../contexts/ThemeContext";
-import { ErrorBoundary } from "../components/ErrorBoundary";
 
-const SEVERITY_COLORS: Record<string, string> = {
-  CRITICAL: "#f87171",
-  HIGH: "#fb923c",
-  MEDIUM: "#facc15",
-  LOW: "#4ade80",
-};
+/* ── Intelligence Flow Banner ────────────────────────────────────────── */
 
-const AGENT_ICONS: Record<string, ReactNode> = {
-  "Detection Agent": <Zap className="h-4 w-4" />,
-  "Investigation Agent": <Radar className="h-4 w-4" />,
-  "Threat Intel Agent": <Bot className="h-4 w-4" />,
-  "Risk Engine": <ShieldHalf className="h-4 w-4" />,
-  "Response Agent": <ShieldCheck className="h-4 w-4" />,
-};
+const FLOW_STEPS = [
+  { label: "SCAN", icon: <Radar className="h-3.5 w-3.5" />, color: "#3b82f6" },
+  { label: "UNDERSTAND", icon: <Brain className="h-3.5 w-3.5" />, color: "#06b6d4" },
+  { label: "CORRELATE", icon: <Globe className="h-3.5 w-3.5" />, color: "#8b5cf6" },
+  { label: "PREDICT", icon: <TrendingUp className="h-3.5 w-3.5" />, color: "#a855f7" },
+  { label: "LOCATE", icon: <MapPin className="h-3.5 w-3.5" />, color: "#f59e0b" },
+  { label: "ALERT", icon: <AlertTriangle className="h-3.5 w-3.5" />, color: "#f97316" },
+  { label: "INTERVENE", icon: <ShieldCheck className="h-3.5 w-3.5" />, color: "#22c55e" },
+];
 
-function ChartTooltip({ active, payload, label, labelFormatter }: {
+function IntelligenceFlow() {
+  return (
+    <div className="intel-card p-4">
+      <div className="flex items-center justify-between">
+        {FLOW_STEPS.map((step, i) => (
+          <div key={step.label} className="flex items-center">
+            <div className="flex flex-col items-center gap-1.5">
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200"
+                style={{ background: `${step.color}15`, color: step.color, border: `1px solid ${step.color}30` }}
+              >
+                {step.icon}
+              </div>
+              <span className="text-2xs font-bold tracking-wider" style={{ color: step.color }}>{step.label}</span>
+            </div>
+            {i < FLOW_STEPS.length - 1 && (
+              <div className="mx-2 h-px w-6 md:w-10 lg:w-16" style={{ background: `linear-gradient(90deg, ${step.color}40, ${FLOW_STEPS[i + 1].color}40)` }} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Chart Tooltip ───────────────────────────────────────────────────── */
+
+function ChartTooltip({ active, payload, label }: {
   active?: boolean;
-  payload?: Array<{ name: string; value: number | string; color: string; payload?: Record<string, unknown> }>;
+  payload?: Array<{ name: string; value: number | string; color: string }>;
   label?: string | number;
-  labelFormatter?: (label: string | number | undefined, payload: unknown) => string;
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border px-3 py-2 font-mono text-[11px] shadow-panel backdrop-blur" style={{ borderColor: "var(--surface-border)", background: "var(--surface)" }}>
-      {label !== undefined && (
-        <p className="mb-1 text-slate-400">
-          {labelFormatter ? labelFormatter(label, payload) : String(label)}
-        </p>
-      )}
+    <div className="intel-card rounded-lg px-3 py-2 font-mono text-2xs">
+      {label !== undefined && <p className="mb-1" style={{ color: "var(--text-muted)" }}>{String(label)}</p>}
       {payload.map((p) => (
-        <p key={p.name} className="flex items-center gap-2 text-slate-200">
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.color, boxShadow: `0 0 6px ${p.color}` }} />
+        <p key={p.name} className="flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.color }} />
           {p.name}: <b>{typeof p.value === "number" ? p.value.toLocaleString() : p.value}</b>
         </p>
       ))}
@@ -60,87 +75,13 @@ function ChartTooltip({ active, payload, label, labelFormatter }: {
   );
 }
 
-function SimulatorPanel() {
-  const { success, error } = useToast();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { hasRole } = useAuth();
-  const [running, setRunning] = useState<string | null>(null);
+/* ── Live Event Feed ─────────────────────────────────────────────────── */
 
-  const scenarios = [
-    { key: "account-takeover", label: "Simulate Account Takeover", desc: "Brute force → login → privilege escalation → data access", color: "#f87171" },
-    { key: "brute-force", label: "Simulate Brute Force", desc: "Repeated failed logins from a hostile source", color: "#fb923c" },
-    { key: "malware", label: "Simulate Malware", desc: "Suspicious process + malware detection + C2 beacon", color: "#a78bfa" },
-    { key: "data-exfiltration", label: "Simulate Data Exfiltration", desc: "Sensitive data access and outbound transfer", color: "#22d3ee" },
-    { key: "privilege-escalation", label: "Simulate Privilege Escalation", desc: "Elevation of privileges on a managed endpoint", color: "#facc15" },
-  ];
-
-  const run = async (key: string) => {
-    setRunning(key);
-    try {
-      const res = await api.post(`/simulations/${key}`);
-      success("Simulation complete", res.data.message as string);
-      await queryClient.invalidateQueries();
-      if (res.data.incident_id) {
-        setTimeout(() => navigate(`/incidents?open=${res.data.incident_id}`), 600);
-      }
-    } catch (err) {
-      error("Simulation failed", getErrorMessage(err));
-    } finally {
-      setRunning(null);
-    }
-  };
-
-  if (!hasRole("ADMIN", "SECURITY_ANALYST")) {
-    return null;
-  }
-
-  return (
-    <Card title="Attack Simulator" subtitle="Safe, synthetic scenarios — never touches real systems">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-        {scenarios.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => run(s.key)}
-            disabled={running !== null}
-            className="group flex items-start gap-3 rounded-lg border p-3 text-left transition disabled:opacity-60"
-            style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}
-          >
-            {running === s.key ? (
-              <Loader2 className="mt-0.5 h-5 w-5 animate-spin" style={{ color: s.color }} />
-            ) : (
-              <PlayCircle className="mt-0.5 h-5 w-5" style={{ color: s.color }} />
-            )}
-            <div>
-              <p className="text-sm font-semibold text-slate-200 group-hover:text-white">{s.label}</p>
-              <p className="mt-0.5 text-[11px] leading-snug text-slate-500">{s.desc}</p>
-            </div>
-          </button>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function AgentStatusPanel({ statuses }: { statuses: DashboardSummary["agent_statuses"] }) {
-  const colorFor = (s: string) =>
-    s === "ONLINE" || s === "COMPLETED" ? "#4ade80" : s === "RUNNING" ? "#38bdf8" : s === "WAITING" ? "#fb923c" : "#f87171";
-  return (
-    <Card title="AI Agent Status" subtitle="Live orchestration health">
-      <div className="space-y-2.5">
-        {statuses.map((a) => (
-          <div key={a.name} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: "var(--surface-raised)" }}>
-            <span style={{ color: colorFor(a.status) }}>{AGENT_ICONS[a.name]}</span>
-            <span className="flex-1 text-xs font-medium text-slate-300">{a.name}</span>
-            <span className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: colorFor(a.status) }}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: colorFor(a.status), boxShadow: `0 0 6px ${colorFor(a.status)}` }} />
-              {a.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
+function useSocketEvent(event: string, handler: (data: Record<string, unknown>) => void) {
+  const { on } = useSocket();
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+  useEffect(() => on(event, (data) => handlerRef.current(data)), [on, event]);
 }
 
 function LiveEventFeed() {
@@ -159,24 +100,22 @@ function LiveEventFeed() {
 
   return (
     <Card
-      title="Live Security Events"
+      title="Live Events"
       subtitle={connected ? "Streaming via WebSocket" : "Most recent events"}
-      actions={
-        <Link to="/live-events" className="text-xs font-semibold text-electric-400 hover:underline">
-          View all <ChevronRight className="inline h-3 w-3" />
-        </Link>
-      }
+      actions={<Link to="/live-events" className="text-xs font-semibold text-blue-400 hover:underline">View all <ChevronRight className="inline h-3 w-3" /></Link>}
     >
-      {events.length === 0 && <EmptyState icon={<Siren className="h-8 w-8" />} title="No events yet" description="Run a simulation or ingest a dataset to stream live events." />}
+      {events.length === 0 && (
+        <EmptyState icon={<Siren className="h-8 w-8" />} title="No events yet" description="Run a simulation or ingest a dataset to stream live events." />
+      )}
       <div className="space-y-1.5">
         {events.map((e) => (
-          <div key={e.event_id as string} className="flex items-center gap-3 rounded-md px-3 py-2 font-mono text-[11px]" style={{ background: "var(--surface-raised)" }}>
+          <div key={e.event_id as string} className="flex items-center gap-3 rounded-lg px-3 py-2 font-mono text-2xs" style={{ background: "var(--bg-tertiary)" }}>
             <SeverityBadge severity={e.severity as string} />
-            <span className="flex-1 truncate text-slate-300">{e.event_type as string}</span>
+            <span className="flex-1 truncate" style={{ color: "var(--text-secondary)" }}>{e.event_type as string}</span>
             {Boolean(e.is_anomalous) && (
-              <span className="badge border border-cyber-red/30 bg-cyber-red/10 text-cyber-red">ANOMALY</span>
+              <span className="badge bg-red-500/15 text-red-400 border border-red-500/30">ANOMALY</span>
             )}
-            <span className="hidden text-slate-600 sm:inline">{new Date(e.timestamp as string).toLocaleTimeString()}</span>
+            <span className="hidden sm:inline" style={{ color: "var(--text-muted)" }}>{new Date(e.timestamp as string).toLocaleTimeString()}</span>
           </div>
         ))}
       </div>
@@ -184,17 +123,105 @@ function LiveEventFeed() {
   );
 }
 
-function useSocketEvent(event: string, handler: (data: Record<string, unknown>) => void) {
-  const { on } = useSocket();
-  const handlerRef = useRef(handler);
-  handlerRef.current = handler;
-  useEffect(() => on(event, (data) => handlerRef.current(data)), [on, event]);
+/* ── AI Insights Panel ───────────────────────────────────────────────── */
+
+function AIInsightsPanel({ data }: { data: DashboardSummary }) {
+  const insights: Array<{ text: string; severity: "info" | "warning" | "critical"; icon: ReactNode }> = [];
+
+  if (data.kpis.some((k) => (k.value as number) > 50)) {
+    insights.push({ text: "Elevated threat activity detected across multiple vectors.", severity: "warning", icon: <AlertTriangle className="h-3.5 w-3.5" /> });
+  }
+  if (data.ai_investigation_summary) {
+    insights.push({ text: `Latest investigation: ${data.ai_investigation_summary.verdict} with ${data.ai_investigation_summary.confidence}% confidence.`, severity: "critical", icon: <Brain className="h-3.5 w-3.5" /> });
+  }
+  if (data.recent_incidents.length > 3) {
+    insights.push({ text: `${data.recent_incidents.length} incidents require attention.`, severity: "warning", icon: <ShieldHalf className="h-3.5 w-3.5" /> });
+  }
+  if (insights.length === 0) {
+    insights.push({ text: "System operating within normal parameters.", severity: "info", icon: <ShieldCheck className="h-3.5 w-3.5" /> });
+  }
+
+  const severityColors = { info: "#3b82f6", warning: "#f59e0b", critical: "#ef4444" };
+
+  return (
+    <Card title="AI Insights" subtitle="Automated intelligence analysis">
+      <div className="space-y-2">
+        {insights.map((insight, i) => (
+          <div key={i} className="flex items-start gap-3 rounded-lg px-3 py-2.5" style={{ background: "var(--bg-tertiary)" }}>
+            <span className="mt-0.5 shrink-0" style={{ color: severityColors[insight.severity] }}>{insight.icon}</span>
+            <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>{insight.text}</p>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
 }
 
+/* ── Simulator Panel ─────────────────────────────────────────────────── */
+
+function SimulatorPanel() {
+  const { success, error } = useToast();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { hasRole } = useAuth();
+  const [running, setRunning] = useState<string | null>(null);
+
+  const scenarios = [
+    { key: "account-takeover", label: "Account Takeover", color: "#ef4444" },
+    { key: "brute-force", label: "Brute Force Attack", color: "#f97316" },
+    { key: "malware", label: "Malware Detection", color: "#8b5cf6" },
+    { key: "data-exfiltration", label: "Data Exfiltration", color: "#06b6d4" },
+  ];
+
+  const run = async (key: string) => {
+    setRunning(key);
+    try {
+      const res = await api.post(`/simulations/${key}`);
+      success("Simulation complete", res.data.message as string);
+      await queryClient.invalidateQueries();
+      if (res.data.incident_id) setTimeout(() => navigate(`/incidents?open=${res.data.incident_id}`), 600);
+    } catch (err) {
+      error("Simulation failed", getErrorMessage(err));
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  if (!hasRole("ADMIN", "SECURITY_ANALYST")) return null;
+
+  return (
+    <Card title="SIH Demo" subtitle="Run synthetic attack scenarios">
+      <div className="grid grid-cols-2 gap-2">
+        {scenarios.map((s) => (
+          <button
+            key={s.key}
+            onClick={() => run(s.key)}
+            disabled={running !== null}
+            className="group flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-all duration-150 hover:border-[var(--border-secondary)] disabled:opacity-50"
+            style={{ borderColor: "var(--border-primary)", background: "var(--bg-tertiary)" }}
+          >
+            {running === s.key ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: s.color }} />
+            ) : (
+              <PlayCircle className="h-3.5 w-3.5" style={{ color: s.color }} />
+            )}
+            <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>{s.label}</span>
+          </button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/* ── Main Dashboard ──────────────────────────────────────────────────── */
+
+const SEVERITY_COLORS: Record<string, string> = { CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#f59e0b", LOW: "#22c55e" };
+
 export default function Dashboard() {
-  const { theme } = useTheme();
-  const chartGridColor = theme === 'dark' ? '#1a2540' : '#e2e8f0';
-  const chartTextColor = theme === 'dark' ? '#64748b' : '#94a3b8';
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { warning, success, error: toastError } = useToast();
+  const [reporting, setReporting] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard"],
@@ -204,12 +231,6 @@ export default function Dashboard() {
     queryKey: ["accuracy"],
     queryFn: async () => (await api.get<{ accuracy: number; precision: number; recall: number; f1: number }>("/security/detection-accuracy")).data,
   });
-  const navigate = useNavigate();
-  const { warning, success, error: toastError } = useToast();
-  const queryClient = useQueryClient();
-  const [reporting, setReporting] = useState(false);
-
-  // ── Financial Crime Intelligence Data ──
   const { data: finData } = useQuery({
     queryKey: ["financial-dashboard"],
     queryFn: async () => (await api.get<any>("/financial/dashboard")).data,
@@ -219,410 +240,222 @@ export default function Dashboard() {
     queryFn: async () => (await api.get<any>("/financial/predictions", { params: { limit: 5 } })).data,
   });
 
-  useSocketEvent("new_incident", () => {
-    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-  });
-  useSocketEvent("incident_updated", () => {
-    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-  });
-  useSocketEvent("new_alert", (d) => {
-    warning("New alert", (d.title as string) ?? "Alert created");
-    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-  });
+  useSocketEvent("new_incident", () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }));
+  useSocketEvent("incident_updated", () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }));
+  useSocketEvent("new_alert", (d) => { warning("New alert", (d.title as string) ?? "Alert created"); queryClient.invalidateQueries({ queryKey: ["dashboard"] }); });
 
   const generateReport = async (incidentId?: string) => {
     setReporting(true);
     try {
-      let res;
-      if (incidentId) {
-        // Try specific incident first
-        try {
-          res = await api.post(`/reports/${incidentId}/generate`);
-        } catch (specificErr) {
-          // If specific incident fails, fall back to latest
-          console.warn("Specific incident report failed, trying latest:", specificErr);
-          res = await api.post(`/reports/generate-latest`);
-        }
-      } else {
-        // No incident ID — use generate-latest
-        res = await api.post(`/reports/generate-latest`);
-      }
-      const data = res.data as { pdf_url?: string; report?: { report_id?: string } };
-      const url = data.pdf_url;
-      const reportId = data.report?.report_id;
-      if (url) {
-        success("Report generated", `Report ${reportId ?? ''} — Opening PDF…`);
-        window.open(url, "_blank");
-      } else {
-        success("Report generated", `Report ${reportId ?? ''} generated (HTML only).`);
-      }
-    } catch (err) {
-      toastError("Report failed", getErrorMessage(err));
-    } finally {
-      setReporting(false);
-    }
+      const res = incidentId
+        ? await api.post(`/reports/${incidentId}/generate`).catch(() => api.post("/reports/generate-latest"))
+        : await api.post("/reports/generate-latest");
+      const d = res.data as { pdf_url?: string; report?: { report_id?: string } };
+      if (d.pdf_url) { success("Report generated", `Opening PDF…`); window.open(d.pdf_url, "_blank"); }
+      else success("Report generated", `${d.report?.report_id ?? ""} generated`);
+    } catch (err) { toastError("Report failed", getErrorMessage(err)); }
+    finally { setReporting(false); }
   };
 
-  if (error) {
-    return (
-      <div className="glass p-8 text-center">
-        <AlertTriangle className="mx-auto h-10 w-10 text-cyber-red" />
-        <p className="mt-3 text-sm text-slate-300">Failed to load dashboard: {getErrorMessage(error)}</p>
-        <button className="btn-ghost mt-4" onClick={() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })}>
-          Retry
-        </button>
-      </div>
-    );
-  }
+  if (error) return (
+    <div className="intel-card p-8 text-center">
+      <AlertTriangle className="mx-auto h-10 w-10 text-red-400" />
+      <p className="mt-3 text-sm" style={{ color: "var(--text-secondary)" }}>Failed to load dashboard: {getErrorMessage(error)}</p>
+      <button className="btn-ghost mt-4" onClick={() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })}>Retry</button>
+    </div>
+  );
 
-  if (isLoading || !data) {
-    return (
-      <div className="space-y-5">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
-        </div>
-        <div className="grid gap-5 lg:grid-cols-3">
-          <Skeleton className="h-72 lg:col-span-2" />
-          <Skeleton className="h-72" />
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
+  if (isLoading || !data) return (
+    <div className="space-y-5">
+      <Skeleton className="h-16" />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)}</div>
+      <div className="grid gap-5 lg:grid-cols-3"><Skeleton className="h-64 lg:col-span-2" /><Skeleton className="h-64" /></div>
+    </div>
+  );
 
   const sevData = Object.entries(data.alerts_by_severity).map(([name, value]) => ({ name, value }));
-  const catData = Object.entries(data.alerts_by_category).map(([name, value]) => ({ name, value })).slice(0, 6);
-  const riskData = data.risk_over_time.length
-    ? data.risk_over_time
-    : [{ date: "today", avg_risk: 0 }];
-
-  const statusData = Object.entries(
-    data.recent_incidents.reduce<Record<string, number>>((acc, i) => {
-      acc[i.status] = (acc[i.status] ?? 0) + 1;
-      return acc;
-    }, {}),
-  ).map(([name, value]) => ({ name, value }));
+  const statusData = Object.entries(data.recent_incidents.reduce<Record<string, number>>((acc, i) => { acc[i.status] = (acc[i.status] ?? 0) + 1; return acc; }, {})).map(([name, value]) => ({ name, value }));
+  const riskData = data.risk_over_time.length ? data.risk_over_time : [{ date: "today", avg_risk: 0 }];
 
   return (
     <div className="space-y-5">
-      {/* Financial Intelligence Hero Section */}
+      {/* Intelligence Flow */}
+      <IntelligenceFlow />
+
+      {/* Hero: Financial Intelligence Summary */}
       {finData && (
-        <Card
-          title="🏦 CyberSentinel-X — Predictive Financial Cybercrime Intelligence"
-          subtitle="SIH26184: AI-powered withdrawal prediction & proactive intervention"
-          actions={
-            <Link to="/financial-intelligence" className="text-xs font-semibold text-electric-400 hover:underline">
-              Full Intelligence View <ChevronRight className="inline h-3 w-3" />
-            </Link>
-          }
-        >
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
-              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>Total Complaints</p>
-              <p className="font-mono text-xl font-bold text-electric-400">{finData.summary.total_complaints}</p>
+        <div className="intel-card relative overflow-hidden p-5">
+          <div className="absolute inset-0 opacity-5" style={{ backgroundImage: "radial-gradient(circle at 50% 50%, #3b82f6, transparent 70%)" }} />
+          <div className="relative flex items-start justify-between">
+            <div>
+              <h2 className="text-sm font-bold tracking-wide" style={{ color: "var(--text-primary)" }}>Predictive Cybercrime Intelligence</h2>
+              <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>SIH26184 — AI-powered withdrawal prediction & proactive intervention</p>
             </div>
-            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
-              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>Amount at Risk</p>
-              <p className="font-mono text-xl font-bold text-cyber-red">₹{(finData.summary.total_amount / 100000).toFixed(1)}L</p>
-            </div>
-            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
-              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>High Risk Zones</p>
-              <p className="font-mono text-xl font-bold text-cyber-orange">{finData.summary.high_risk_zones} <span className="text-[10px] text-slate-500">/ {finData.summary.total_zones}</span></p>
-            </div>
-            <div className="rounded-lg border p-3" style={{ borderColor: "var(--surface-border)", background: "var(--surface-raised)" }}>
-              <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--on-surface-faint)" }}>Active Alerts</p>
-              <p className="font-mono text-xl font-bold text-cyber-purple">{finData.summary.active_alerts}</p>
-            </div>
+            <Link to="/financial-intelligence" className="btn-ghost btn-sm">Full View <ChevronRight className="h-3 w-3" /></Link>
           </div>
-          {predData?.alerts && predData.alerts.length > 0 && (
-            <div className="mt-4 rounded-lg border border-cyber-red/30 bg-cyber-red/5 p-3">
-              <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-cyber-red">
+          <div className="relative mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              { label: "Total Complaints", value: finData.summary.total_complaints, color: "#3b82f6" },
+              { label: "Amount at Risk", value: `₹${(finData.summary.total_amount / 100000).toFixed(1)}L`, color: "#ef4444" },
+              { label: "High Risk Zones", value: `${finData.summary.high_risk_zones} / ${finData.summary.total_zones}`, color: "#f97316" },
+              { label: "Active Alerts", value: finData.summary.active_alerts, color: "#8b5cf6" },
+            ].map((kpi) => (
+              <div key={kpi.label} className="rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border-primary)", background: "var(--bg-tertiary)" }}>
+                <p className="text-2xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{kpi.label}</p>
+                <p className="mt-1 font-mono text-lg font-bold" style={{ color: kpi.color }}>{kpi.value}</p>
+              </div>
+            ))}
+          </div>
+          {predData?.alerts?.length > 0 && (
+            <div className="relative mt-4 rounded-lg border border-red-500/20 bg-red-500/5 p-3">
+              <p className="mb-1.5 flex items-center gap-1.5 text-2xs font-bold uppercase tracking-wider text-red-400">
                 <Target className="h-3 w-3" /> Top Predictive Alert
               </p>
               <div className="flex items-center gap-3">
-                <span className="font-mono text-xs font-bold text-cyber-red">{predData.alerts[0].alert_id}</span>
-                <span className="text-xs text-slate-200">{predData.alerts[0].predicted_zone}</span>
-                <span className="badge border border-cyber-red/40 bg-cyber-red/10 text-cyber-red text-[9px]">
-                  {(predData.alerts[0].risk_probability * 100).toFixed(0)}% risk
-                </span>
-                <span className="text-[10px] text-slate-500">{predData.alerts[0].crime_pattern}</span>
-                <Link to="/predictive-alerts" className="ml-auto text-[10px] font-semibold text-electric-400 hover:underline">
-                  View All →
-                </Link>
+                <span className="font-mono text-xs font-bold text-red-400">{predData.alerts[0].alert_id}</span>
+                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{predData.alerts[0].predicted_zone}</span>
+                <span className="badge bg-red-500/15 text-red-400 border border-red-500/30">{(predData.alerts[0].risk_probability * 100).toFixed(0)}% risk</span>
+                <Link to="/predictive-alerts" className="ml-auto text-2xs font-semibold text-blue-400 hover:underline">View All →</Link>
               </div>
             </div>
           )}
-        </Card>
+        </div>
       )}
 
-      {/* KPI row */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        {data.kpis.map((k) => (
-          <StatCard key={k.label} label={k.label} value={k.value} color={k.color ?? "#38bdf8"} />
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        {data.kpis.slice(0, 4).map((k) => (
+          <StatCard key={k.label} label={k.label} value={k.value} color={k.color ?? "#3b82f6"} />
         ))}
       </div>
 
-      {/* 3D threat analysis */}
+      {/* Main content: Map + Alerts + AI */}
       <div className="grid gap-5 lg:grid-cols-3">
-        <ErrorBoundary>
-          <Card
-            title="3D Threat Space"
-            subtitle="UNSW-NB15 network flows — bytes sent / received / rate, colored by attack family"
-            className="lg:col-span-2"
-            actions={
-              <Link to="/data-sources" className="text-xs font-semibold text-electric-400 hover:underline">
-                Dataset <ChevronRight className="inline h-3 w-3" />
-              </Link>
-            }
-          >
-            <ThreatSpace3D height={400} />
-          </Card>
-        </ErrorBoundary>
-
-        <ErrorBoundary>
-          <Card title="Attack Rhythm 3D" subtitle="Attack family × hour of day — flow volume">
-            <AttackBar3D height={400} />
-          </Card>
-        </ErrorBoundary>
-      </div>
-
-      {/* Live flow + AI investigation + agents */}
-      <div className="grid gap-5 lg:grid-cols-3">
+        {/* Left: Charts + Incidents */}
         <div className="space-y-5 lg:col-span-2">
-          <Card title="Live Threat Flow" subtitle="Hourly event volume — total vs anomalous (real-time via WebSocket)">
-            <ErrorBoundary>
-              <EventFlowChart hours={48} />
-            </ErrorBoundary>
-          </Card>
-
-          <Card title="AI Investigation Summary" subtitle="Latest agent finding">
-            {data.ai_investigation_summary ? (
-              <div>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-bold text-slate-100">{data.ai_investigation_summary.incident_title}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">{data.ai_investigation_summary.incident_id}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="badge border border-cyber-red/30 bg-cyber-red/10 text-cyber-red">
-                      {data.ai_investigation_summary.verdict}
-                    </p>
-                    <p className="mt-1 font-mono text-xl font-bold text-electric-400">
-                      {data.ai_investigation_summary.confidence}% <span className="text-[10px] font-normal text-slate-500">confidence</span>
-                    </p>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm leading-relaxed text-slate-400">
-                  {data.ai_investigation_summary.summary}
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    className="btn-ghost"
-                    onClick={() => navigate(`/incidents?open=${data.ai_investigation_summary?.incident_id}`)}
-                  >
-                    Open investigation <ChevronRight className="h-4 w-4" />
-                  </button>
-                  <button
-                    className="btn-primary"
-                    onClick={() => generateReport(data.ai_investigation_summary?.incident_id)}
-                    disabled={reporting}
-                  >
-                    {reporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileTextIcon className="h-4 w-4" />}
-                    {reporting ? "Generating…" : "Generate Report"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <EmptyState
-                icon={<Bot className="h-8 w-8" />}
-                title="No investigation yet"
-                description="Ingest the UNSW-NB15 dataset or run an attack simulation and the Investigation Agent will produce a findings summary here."
-              />
-            )}
-          </Card>
-
+          {/* Risk Trend + Severity Distribution */}
           <div className="grid gap-5 md:grid-cols-2">
+            <Card title="Risk Score Trend" subtitle="Average risk over time">
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={riskData} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="riskGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ef4444" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="#ef4444" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-primary)" vertical={false} />
+                  <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis stroke="var(--text-muted)" fontSize={10} domain={[0, 100]} tickLine={false} axisLine={false} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Area type="monotone" dataKey="avg_risk" name="Avg Risk" stroke="#ef4444" strokeWidth={2} fill="url(#riskGrad)" dot={{ r: 2, fill: "#ef4444" }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </Card>
+
             <Card title="Alerts by Severity">
-              <ResponsiveContainer width="100%" height={190}>
+              <ResponsiveContainer width="100%" height={180}>
                 <BarChart data={sevData} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
                   <defs>
                     {Object.entries(SEVERITY_COLORS).map(([k, c]) => (
                       <linearGradient key={k} id={`sevGrad${k}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={c} stopOpacity={0.95} />
-                        <stop offset="100%" stopColor={c} stopOpacity={0.35} />
+                        <stop offset="0%" stopColor={c} stopOpacity={0.9} />
+                        <stop offset="100%" stopColor={c} stopOpacity={0.3} />
                       </linearGradient>
                     ))}
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
-                  <XAxis dataKey="name" stroke={chartTextColor} fontSize={11} tickLine={false} axisLine={{ stroke: chartGridColor }} />
-                  <YAxis stroke={chartTextColor} fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} />
-                  <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(56,189,248,0.06)" }} />
-                  <Bar dataKey="value" name="Alerts" radius={[8, 8, 2, 2]} animationDuration={700}>
-                    {sevData.map((s) => (
-                      <Cell key={s.name} fill={`url(#sevGrad${s.name})`} stroke={SEVERITY_COLORS[s.name]} strokeOpacity={0.5} />
-                    ))}
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-primary)" vertical={false} />
+                  <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis stroke="var(--text-muted)" fontSize={10} allowDecimals={false} tickLine={false} axisLine={false} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Bar dataKey="value" name="Alerts" radius={[6, 6, 2, 2]}>
+                    {sevData.map((s) => <Cell key={s.name} fill={`url(#sevGrad${s.name})`} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </Card>
-
-            <Card title="Risk Score Over Time">
-              <ResponsiveContainer width="100%" height={190}>
-                <AreaChart data={riskData} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="riskGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#f87171" stopOpacity={0.55} />
-                      <stop offset="100%" stopColor="#f87171" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
-                  <XAxis dataKey="date" stroke={chartTextColor} fontSize={11} tickLine={false} axisLine={{ stroke: chartGridColor }} />
-                  <YAxis stroke={chartTextColor} fontSize={11} domain={[0, 100]} tickLine={false} axisLine={false} />
-                  <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#334155", strokeDasharray: "4 4" }} />
-                  <Area type="monotone" dataKey="avg_risk" name="Avg risk" stroke="#f87171" strokeWidth={2.5} fill="url(#riskGrad)" dot={{ r: 3, fill: "#f87171", strokeWidth: 0 }} animationDuration={700} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </Card>
           </div>
-        </div>
 
-        <div className="space-y-5">
-          <AgentStatusPanel statuses={data.agent_statuses} />
-          <SimulatorPanel />
-        </div>
-      </div>
+          {/* Detection Accuracy */}
+          <Card title="Detection Engine" subtitle="Model performance metrics">
+            {accuracy ? (
+              <AccuracyGauge accuracy={accuracy.accuracy} precision={accuracy.precision} recall={accuracy.recall} f1={accuracy.f1} />
+            ) : <Skeleton className="h-28" />}
+          </Card>
 
-      {/* Charts row */}
-      <div className="grid gap-5 lg:grid-cols-3">
-        <Card title="Alerts by Category">
-          {catData.length === 0 ? (
-            <EmptyState title="No categories yet" />
-          ) : (
-            <ResponsiveContainer width="100%" height={230}>
-              <PieChart>
-                <Pie data={catData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={85} paddingAngle={3} stroke="none" animationDuration={700}>
-                {catData.map((_, i) => (
-                  <Cell key={i} fill={["#38bdf8", "#a78bfa", "#f87171", "#4ade80", "#facc15", "#fb923c"][i % 6]} style={{ filter: "drop-shadow(0 0 5px rgba(56,189,248,0.25))" }} />
-                ))}
-                </Pie>
-                <Tooltip content={<ChartTooltip />} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
-
-        <Card title="Top Threat Sources">
-          {data.top_threat_sources.length === 0 ? (
-            <EmptyState title="No sources tracked" />
-          ) : (
-            <div className="space-y-2.5">
-              {data.top_threat_sources.map((s, i) => (
-                <div key={s.source} className="flex items-center gap-3">
-                  <span className="w-32 truncate font-mono text-[11px] text-slate-400">{s.source}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: "var(--surface-raised)" }}>
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-electric-500 to-cyber-red transition-all duration-700"
-                      style={{ width: `${Math.min(100, (s.count / Math.max(1, data.top_threat_sources[0].count)) * 100)}%`, boxShadow: i === 0 ? "0 0 8px rgba(248,113,113,0.5)" : undefined }}
-                    />
-                  </div>
-                  <span className="w-8 text-right font-mono text-xs text-slate-300">{s.count}</span>
+          {/* AI Investigation */}
+          {data.ai_investigation_summary && (
+            <Card title="Latest AI Investigation" subtitle="Automated threat analysis">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>{data.ai_investigation_summary.incident_title}</p>
+                  <p className="mt-0.5 font-mono text-2xs" style={{ color: "var(--text-muted)" }}>{data.ai_investigation_summary.incident_id}</p>
                 </div>
-              ))}
-            </div>
+                <div className="text-right">
+                  <span className="badge bg-red-500/15 text-red-400 border border-red-500/30">{data.ai_investigation_summary.verdict}</span>
+                  <p className="mt-1 font-mono text-lg font-bold text-blue-400">{data.ai_investigation_summary.confidence}%</p>
+                </div>
+              </div>
+              <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>{data.ai_investigation_summary.summary}</p>
+              <div className="mt-3 flex gap-2">
+                <button className="btn-ghost btn-sm" onClick={() => navigate(`/incidents?open=${data.ai_investigation_summary?.incident_id}`)}>Investigate</button>
+                <button className="btn-primary btn-sm" onClick={() => generateReport(data.ai_investigation_summary?.incident_id)} disabled={reporting}>
+                  {reporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileTextIcon className="h-3 w-3" />}
+                  {reporting ? "Generating..." : "Report"}
+                </button>
+              </div>
+            </Card>
           )}
-        </Card>
 
-        <LiveEventFeed />
-      </div>
+          {/* Recent Incidents */}
+          <Card title="Recent Incidents" actions={<Link to="/incidents" className="text-xs font-semibold text-blue-400 hover:underline">All incidents <ChevronRight className="inline h-3 w-3" /></Link>}>
+            {data.recent_incidents.length === 0 ? (
+              <EmptyState icon={<Siren className="h-8 w-8" />} title="No incidents" description="Ingested attacks and simulated threats will appear here." />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table-base">
+                  <thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Risk</th><th>Created</th></tr></thead>
+                  <tbody>
+                    {data.recent_incidents.map((inc) => (
+                      <tr key={inc.id} className="cursor-pointer" onClick={() => navigate(`/incidents?open=${inc.id}`)}>
+                        <td className="font-mono text-2xs text-blue-400">{inc.incident_id}</td>
+                        <td className="max-w-[200px] truncate text-xs font-medium" style={{ color: "var(--text-primary)" }}>{inc.title}</td>
+                        <td><SeverityBadge severity={inc.severity} /></td>
+                        <td><StatusBadge status={inc.status} /></td>
+                        <td className="font-mono text-2xs">{inc.risk_score != null ? `${Math.round(inc.risk_score)}` : "—"}</td>
+                        <td className="text-2xs" style={{ color: "var(--text-muted)" }}>{new Date(inc.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
 
-      {/* ML accuracy + trend row */}
-      <div className="grid gap-5 lg:grid-cols-3">
-        <Card title="Detection Engine Accuracy" subtitle="Measured on a labeled evaluation corpus">
-          {accuracy ? (
-            <AccuracyGauge
-              accuracy={accuracy.accuracy}
-              precision={accuracy.precision}
-              recall={accuracy.recall}
-              f1={accuracy.f1}
-            />
-          ) : (
-            <Skeleton className="h-28" />
+        {/* Right sidebar: Alerts + AI + Simulator */}
+        <div className="space-y-5">
+          <LiveEventFeed />
+          <AIInsightsPanel data={data} />
+          <SimulatorPanel />
+          {data.agent_statuses.length > 0 && (
+            <Card title="Agent Status" subtitle="AI orchestration health">
+              <div className="space-y-2">
+                {data.agent_statuses.map((a) => {
+                  const color = a.status === "ONLINE" || a.status === "COMPLETED" ? "#22c55e" : a.status === "RUNNING" ? "#3b82f6" : "#f59e0b";
+                  return (
+                    <div key={a.name} className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "var(--bg-tertiary)" }}>
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                      <span className="flex-1 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>{a.name}</span>
+                      <span className="text-2xs font-semibold" style={{ color }}>{a.status}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
           )}
-        </Card>
-
-        <Card title="Anomaly Pressure" subtitle="Anomalous events trend (latest window)">
-          <ResponsiveContainer width="100%" height={190}>
-            <LineChart data={[{ t: "00:00", v: 2 }, { t: "06:00", v: 5 }, { t: "12:00", v: 9 }, { t: "18:00", v: 14 }, { t: "now", v: data.kpis[4]?.value ?? 12 }]} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
-              <defs>
-                <linearGradient id="anomStroke" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#a78bfa" />
-                  <stop offset="100%" stopColor="#f87171" />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
-              <XAxis dataKey="t" stroke={chartTextColor} fontSize={11} tickLine={false} axisLine={{ stroke: chartGridColor }} />
-              <YAxis stroke={chartTextColor} fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} />
-              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "#334155", strokeDasharray: "4 4" }} />
-              <Line type="monotone" dataKey="v" name="Anomalous events" stroke="url(#anomStroke)" strokeWidth={2.5} dot={{ r: 4, fill: "#a78bfa", strokeWidth: 0 }} activeDot={{ r: 5 }} animationDuration={700} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card title="Incidents by Status">
-          <ResponsiveContainer width="100%" height={190}>
-            <PieChart>
-              <Pie
-                data={statusData}
-                dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} innerRadius={35} paddingAngle={3} stroke="none" animationDuration={700}
-              >
-                {["#38bdf8", "#a78bfa", "#f87171", "#4ade80", "#facc15"].map((c, i) => (
-                  <Cell key={i} fill={c} style={{ filter: "drop-shadow(0 0 5px rgba(56,189,248,0.2))" }} />
-                ))}
-              </Pie>
-              <Tooltip content={<ChartTooltip />} />
-            </PieChart>
-          </ResponsiveContainer>
-        </Card>
+        </div>
       </div>
-
-      {/* Recent incidents */}
-      <Card
-        title="Recent Incidents"
-        actions={
-          <Link to="/incidents" className="text-xs font-semibold text-electric-400 hover:underline">
-            All incidents <ChevronRight className="inline h-3 w-3" />
-          </Link>
-        }
-      >
-        {data.recent_incidents.length === 0 ? (
-          <EmptyState icon={<Siren className="h-8 w-8" />} title="No incidents" description="Ingested attacks and simulated threats will appear here." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="table-base">
-              <thead>
-                <tr>
-                  <th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Risk</th><th>Category</th><th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recent_incidents.map((inc) => (
-                  <tr key={inc.id} className="cursor-pointer" onClick={() => navigate(`/incidents?open=${inc.id}`)}>
-                    <td className="font-mono text-xs text-electric-400">{inc.incident_id}</td>
-                    <td className="max-w-[260px] truncate font-medium text-slate-200">{inc.title}</td>
-                    <td><SeverityBadge severity={inc.severity} /></td>
-                    <td><StatusBadge status={inc.status} /></td>
-                    <td className="font-mono text-xs">
-                      {inc.risk_score != null ? `${Math.round(inc.risk_score)} (${inc.risk_label})` : "—"}
-                    </td>
-                    <td className="text-xs text-slate-400">{inc.category}</td>
-                    <td className="text-xs text-slate-500">{new Date(inc.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
     </div>
   );
 }

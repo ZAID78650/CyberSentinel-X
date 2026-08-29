@@ -77,4 +77,4 @@ ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Shell form so WEB_CONCURRENCY is expandable at runtime — Render's free tier
 # has 512 MB RAM, so default to 2 workers (4 can OOM at startup).
-CMD gunicorn app.main:app --workers ${WEB_CONCURRENCY:-2} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --access-logfile - --timeout 120 --max-requests 1000
+CMD gunicorn app.main:app --workers ${WEB_CONCURRENCY:-2} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --access-logfile - --timeout 600 --max-requests 1000

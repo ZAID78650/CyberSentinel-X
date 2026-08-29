@@ -588,7 +588,7 @@ export default function CybercrimeScanner() {
           formData.append("file", f);
           const res = await api.post("/dataset/upload", formData, {
             headers: { "Content-Type": "multipart/form-data" },
-            timeout: 180000,
+            timeout: 600000, // 10 minutes for large files
           });
           const uploadedName = (res.data as { name?: string; dataset?: string }).name ?? (res.data as { dataset?: string }).dataset ?? f.name;
           setSelectedDataset(uploadedName);

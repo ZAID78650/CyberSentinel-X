@@ -367,7 +367,7 @@ function UploadTab() {
     form.append("file", file);
     try {
       await api.post("/dataset/upload", form, {
-        timeout: 300000,
+        timeout: 600000, // 10 minutes for large files
         onUploadProgress: (e) => {
           if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
         },

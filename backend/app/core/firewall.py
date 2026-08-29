@@ -47,7 +47,7 @@ _LAYER_ORDER = [
 
 _LAYER_META: Dict[str, Dict[str, Any]] = {
     "REQUEST_ID": {"name": "Request Correlation", "description": "Tags every request with a correlation ID", "color": "#38bdf8"},
-    "BODY_LIMIT": {"name": "Payload Size Guard", "description": "Rejects oversized request bodies (>1 MB)", "color": "#facc15"},
+    "BODY_LIMIT": {"name": "Payload Size Guard", "description": "Rejects oversized request bodies (>1 MB, uploads up to 1 TB)", "color": "#facc15"},
     "WAF_PAYLOAD": {"name": "Web App Firewall", "description": "Filters SQLi / XSS / command-injection patterns", "color": "#fb923c"},
     "SECURITY_HDR": {"name": "Hardened Headers", "description": "CSP, HSTS, frame and MIME-sniffing protection", "color": "#4ade80"},
     "RATE_LIMIT": {"name": "Rate Limiting", "description": "Per-IP request throttling", "color": "#22d3ee"},
@@ -65,11 +65,11 @@ _block_log: deque = deque(maxlen=200)
 _lock = RLock()
 
 MAX_BODY_BYTES = 1024 * 1024  # 1 MB (regular API payloads)
-MAX_UPLOAD_BYTES = 256 * 1024 * 1024  # 256 MB (dataset CSV uploads)
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024 * 1024  # 1 TB (dataset CSV/JSON uploads)
 
 
 def _body_limit_for(request) -> int:
-    """The dataset upload endpoint accepts large CSVs; everything else is 1 MB."""
+    """The dataset upload endpoint accepts large CSVs/JSONs up to 1 TB; everything else is 1 MB."""
     if request.url.path == "/api/dataset/upload" and "multipart/form-data" in request.headers.get("content-type", ""):
         return MAX_UPLOAD_BYTES
     return MAX_BODY_BYTES

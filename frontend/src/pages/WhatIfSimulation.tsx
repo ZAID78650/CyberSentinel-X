@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  AlertTriangle, Brain, Cpu, FileJson, FileText, Filter, Plus, Play, RefreshCcw, Target, TrendingUp, Trash2, Upload, Zap,
+  AlertTriangle, Brain, Cpu, FileJson, FileText, Plus, Play, RefreshCcw, Target, TrendingUp, Trash2, Upload,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { Card, EmptyState, Skeleton, StatCard } from "../components/ui";
@@ -228,7 +228,7 @@ export default function WhatIfSimulation() {
     setScenarios(scenarios.filter((_, i) => i !== idx));
   };
 
-  const presetScenarios = [
+  const presetScenarios: Scenario[] = [
     { name: "Velocity Spike", description: "3x transaction velocity increase", modifications: { velocity_24h: 1.0 } },
     { name: "High Value Transfer", description: "10x normal transaction amount", modifications: { fraud_amount_ratio: 1.0 } },
     { name: "New Beneficiary Network", description: "Connected to 8 suspect accounts", modifications: { linked_complaints: 0.8, connected_components: 0.8 } },
@@ -467,7 +467,7 @@ export default function WhatIfSimulation() {
           {simResult.sensitivity_analysis && (
             <Card title="📊 Sensitivity Analysis" subtitle="How each factor independently affects risk">
               <div className="grid gap-4 md:grid-cols-2">
-                {Object.entries(simResult.sensitivity_analysis).map(([feature, points]: [string, any[]]) => (
+                {Object.entries(simResult.sensitivity_analysis as Record<string, unknown[]>).map(([feature, points]) => (
                   <div key={feature} className="rounded-lg border border-night-700/70 p-3">
                     <p className="mb-2 text-xs font-bold text-slate-300">{feature.replace(/_/g, ' ')}</p>
                     <div className="flex items-end gap-1 h-20">

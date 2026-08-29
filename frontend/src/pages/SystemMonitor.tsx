@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, AlertTriangle, Cpu, HardDrive, RefreshCcw, Server, Zap } from "lucide-react";
+import { Activity, Cpu, HardDrive, RefreshCw, Zap } from "lucide-react";
 import { api } from "../services/api";
 import { Card, Skeleton, StatCard } from "../components/ui";
 import { MemoryStick } from "lucide-react";

@@ -57,6 +57,20 @@ server {
         proxy_send_timeout 3600s;
     }
 
+    # Static assets with content hash — cache forever
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    # HTML/JS — no cache to prevent stale chunk issues
+    location ~* \.(?:js|css|html|json)$ {
+        expires -1;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+    }
+
     gzip on;
     gzip_types text/plain text/css application/json application/javascript image/svg+xml;
 }

@@ -568,21 +568,51 @@ export default function CybercrimeScanner() {
       return;
     }
 
-    // Upload the file
+    // Warm up backend if sleeping (Render free tier spins down after inactivity)
+    const warmUp = async (retries = 3): Promise<void> => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          await api.get("/health", { timeout: 15000 });
+          return;
+        } catch {
+          if (i < retries - 1) await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+    };
+
+    // Upload the file with retry
+    const uploadWithRetry = async (retries = 2): Promise<void> => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const formData = new FormData();
+          formData.append("file", f);
+          const res = await api.post("/dataset/upload", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+            timeout: 180000,
+          });
+          const uploadedName = (res.data as { name?: string; dataset?: string }).name ?? (res.data as { dataset?: string }).dataset ?? f.name;
+          setSelectedDataset(uploadedName);
+          const listRes = await api.get<{ datasets: Array<{ name: string; rows: number; source: string }> }>("/dataset/uploads");
+          setDatasets(listRes.data.datasets);
+          return;
+        } catch (err) {
+          const msg = getErrorMessage(err);
+          const is503 = msg.includes("503") || msg.includes("Service Unavailable");
+          if (is503 && attempt < retries) {
+            setError(`Backend waking up... retry ${attempt + 1}/${retries}`);
+            await warmUp(2);
+            continue;
+          }
+          throw err;
+        }
+      }
+    };
+
     try {
-      const formData = new FormData();
-      formData.append("file", f);
-      const res = await api.post("/dataset/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-        timeout: 120000,
-      });
-      const uploadedName = (res.data as { name?: string; dataset?: string }).name ?? (res.data as { dataset?: string }).dataset ?? f.name;
-      setSelectedDataset(uploadedName);
-      // Refresh dataset list
-      const listRes = await api.get<{ datasets: Array<{ name: string; rows: number; source: string }> }>("/dataset/uploads");
-      setDatasets(listRes.data.datasets);
+      await warmUp();
+      await uploadWithRetry();
     } catch (err) {
-      setError(`Upload failed: ${getErrorMessage(err)}`);
+      setError(`Upload failed: ${getErrorMessage(err)}. The backend may be starting up — try again in 30 seconds.`);
     } finally {
       setUploading(false);
     }
@@ -625,6 +655,9 @@ export default function CybercrimeScanner() {
     }, 200);
 
     try {
+      // Warm up backend if sleeping
+      try { await api.get("/health", { timeout: 10000 }); } catch { await new Promise(r => setTimeout(r, 5000)); }
+
       const res = await api.post(`/v2/scan`, {
         dataset: selectedDataset,
         limit: 500,

@@ -13,9 +13,10 @@ import { api, getErrorMessage } from "../services/api";
 import { useSocket } from "../contexts/WebSocketContext";
 import { useToast } from "../components/ui/Toast";
 import { AccuracyGauge, Card, EmptyState, SeverityBadge, Skeleton, StatCard, StatusBadge } from "../components/ui";
-import ThreatSpace3D from "../components/charts/ThreatSpace3D";
-import AttackBar3D from "../components/charts/AttackBar3D";
-import EventFlowChart from "../components/charts/EventFlowChart";
+import { lazy, Suspense } from "react";
+const ThreatSpace3D = lazy(() => import("../components/charts/ThreatSpace3D"));
+const AttackBar3D = lazy(() => import("../components/charts/AttackBar3D"));
+const EventFlowChart = lazy(() => import("../components/charts/EventFlowChart"));
 import type { DashboardSummary, SecurityEvent } from "../types";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
@@ -375,13 +376,13 @@ export default function Dashboard() {
               </Link>
             }
           >
-            <ThreatSpace3D height={400} />
+            <Suspense fallback={<Skeleton className="h-[400px]" />}> <ThreatSpace3D height={400} /> </Suspense>
           </Card>
         </ErrorBoundary>
 
         <ErrorBoundary>
           <Card title="Attack Rhythm 3D" subtitle="Attack family × hour of day — flow volume">
-            <AttackBar3D height={400} />
+            <Suspense fallback={<Skeleton className="h-[400px]" />}> <AttackBar3D height={400} /> </Suspense>
           </Card>
         </ErrorBoundary>
       </div>
@@ -391,7 +392,7 @@ export default function Dashboard() {
         <div className="space-y-5 lg:col-span-2">
           <Card title="Live Threat Flow" subtitle="Hourly event volume — total vs anomalous (real-time via WebSocket)">
             <ErrorBoundary>
-              <EventFlowChart hours={48} />
+              <Suspense fallback={<Skeleton className="h-[300px]" />}> <EventFlowChart hours={48} /> </Suspense>
             </ErrorBoundary>
           </Card>
 

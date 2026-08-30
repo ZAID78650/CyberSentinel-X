@@ -146,7 +146,7 @@ def report_html(report_id: UUID, db: Session = Depends(get_db), _user: User = De
 # ══════════════════════════════════════════════════════════════════════════
 
 @router.post("/enhanced/generate")
-def generate_enhanced(
+async def generate_enhanced(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -164,16 +164,13 @@ def generate_enhanced(
     from app.services.audit import log_action
     from app.services.totp import verify_token as totp_verify
     import time as _time
+    import json as _json
 
-    # Read body manually for robustness
+    # Read body manually for robustness — avoids Pydantic optional body issues
     tfa_code = None
     try:
-        body = request._body if hasattr(request, '_body') else None
-        if not body:
-            import asyncio
-            body = asyncio.get_event_loop().run_until_complete(request.body())
+        body = await request.body()
         if body:
-            import json as _json
             data = _json.loads(body)
             tfa_code = data.get("tfa_code")
     except Exception:

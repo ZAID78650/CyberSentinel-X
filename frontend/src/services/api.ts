@@ -65,7 +65,7 @@ export const tokenStore = {
 };
 
 /* ── Axios Instance ─────────────────────────────────────────────────── */
-export const api = axios.create({ baseURL: API_BASE, timeout: 60000 });
+export const api = axios.create({ baseURL: API_BASE, timeout: 120000 });
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = tokenStore.getAccess();
@@ -103,19 +103,20 @@ api.interceptors.response.use(
         return { data: demoData, status: 200, statusText: "OK (demo)", headers: {}, config: original } as any;
       }
     }
-    // Mark backend as down on first network/proxy error (no retries needed)
-    if (!error.response || [502, 503, 504].includes(error.response?.status ?? 0)) {
-      _backendDown = true;
-    }
-
     const method = (original?.method ?? "").toUpperCase();
     const retryableMethod = method === "GET" || method === "POST" || method === "PUT" || method === "PATCH";
+    // Retry on 502/503/504 BEFORE marking backend as down
     if (original && retryableMethod && isTransientGatewayError(error) && !_backendDown && (original._retryCount ?? 0) < MAX_GATEWAY_RETRIES) {
       original._retryCount = (original._retryCount ?? 0) + 1;
       const delay = Math.min(1000 * 2 ** original._retryCount, 8000);
       await new Promise((resolve) => setTimeout(resolve, delay));
       return api(original);
     }
+    // Only mark backend as down AFTER all retries exhausted
+    if (!error.response || [502, 503, 504].includes(error.response?.status ?? 0)) {
+      _backendDown = true;
+    }
+
     if (error.response?.status === 401 && original && !original._retry && !original.url?.includes("/auth/login")) {
       original._retry = true;
       refreshing = refreshing ?? refreshAccessToken().finally(() => { refreshing = null; });

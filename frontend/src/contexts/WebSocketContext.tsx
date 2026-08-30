@@ -45,12 +45,31 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
     disposedRef.current = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let healthTimer: ReturnType<typeof setInterval> | undefined;
     let failedAttempts = 0;
+    let wsFailed = false;
+
+    // HTTP health poll fallback — used when WebSocket fails (e.g. on Vercel)
+    const pollHealth = async () => {
+      if (disposedRef.current) return;
+      try {
+        const res = await fetch("/health", { method: "GET", signal: AbortSignal.timeout(5000) });
+        if (res.ok) setConnected(true);
+      } catch {
+        setConnected(false);
+      }
+    };
+
+    const startHealthPoll = () => {
+      if (healthTimer) return;
+      pollHealth();
+      healthTimer = setInterval(pollHealth, 30000);
+    };
 
     const connect = () => {
-      if (disposedRef.current) return;
+      if (disposedRef.current || wsFailed) return;
       const token = tokenStore.getAccess();
-      if (!token) return;
+      if (!token) { startHealthPoll(); return; }
       const url = `${WS_URL}?token=${encodeURIComponent(token)}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -59,6 +78,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         reconnectAttempt.current = 0;
         failedAttempts = 0;
         setConnected(true);
+        if (healthTimer) { clearInterval(healthTimer); healthTimer = undefined; }
       };
       ws.onmessage = (ev) => {
         try {
@@ -73,9 +93,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         setConnected(false);
         if (disposedRef.current) return;
         failedAttempts += 1;
-        // Stop reconnecting after 5 failed attempts to avoid infinite loop
-        if (failedAttempts > 5) return;
-        const delay = Math.min(1000 * 2 ** reconnectAttempt.current, 15000);
+        if (failedAttempts > 3) {
+          // WebSocket not supported (e.g. Vercel) — fall back to HTTP health polling
+          wsFailed = true;
+          startHealthPoll();
+          return;
+        }
+        const delay = Math.min(1000 * 2 ** reconnectAttempt.current, 10000);
         reconnectAttempt.current += 1;
         retryTimer = setTimeout(connect, delay);
       };
@@ -86,6 +110,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     return () => {
       disposedRef.current = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (healthTimer) clearInterval(healthTimer);
       wsRef.current?.close();
       wsRef.current = null;
     };

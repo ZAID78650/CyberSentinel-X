@@ -78,18 +78,47 @@ def list_providers():
     return {"providers": out}
 
 
-def _redirect_uri(provider: str) -> str:
+def _redirect_uri(provider: str, request: Request = None) -> str:
     """The callback URL registered with the provider.
 
     This MUST live on the FRONTEND origin, not the backend's: the browser
     reaches /api through the frontend's nginx (or Vite dev) proxy, so the
     CSRF state cookie is set on the frontend host. The provider redirects the
     browser to the callback on that same host, the cookie is sent, and nginx
-    proxies the request (cookie intact) to the backend. If we pointed the
-    provider at the backend origin instead, the cookie would never be sent
-    and every login would fail with "OAuth state mismatch".
+    proxies the request (cookie intact) to the backend.
+
+    We dynamically derive the origin from the incoming request so that
+    Google OAuth callbacks always land on the same origin the user started
+    from (Vercel, Render, localhost — whichever they're on).
     """
+    if request:
+        origin = _get_request_origin(request)
+        if origin:
+            return origin.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
     return get_settings().frontend_url.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
+
+
+def _get_request_origin(request: Request) -> str:
+    """Derive the frontend origin from the incoming request.
+
+    Checks Origin header first (XHR/fetch), then Referer (browser nav),
+    then the Host header (direct). Returns empty string if none found.
+    """
+    origin = request.headers.get("origin", "")
+    if origin:
+        return origin
+    referer = request.headers.get("referer", "")
+    if referer:
+        # Strip path — we only want the origin
+        from urllib.parse import urlparse
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    host = request.headers.get("host", "")
+    if host:
+        scheme = "https" if (request.headers.get("x-forwarded-proto") == "https" or host.endswith(".vercel.app") or host.endswith(".onrender.com")) else "http"
+        return f"{scheme}://{host}"
+    return ""
 
 
 def _state_cookie(response: Response) -> str:
@@ -101,18 +130,18 @@ def _state_cookie(response: Response) -> str:
         max_age=600,
         httponly=True,
         samesite="lax",
-        secure=(get_settings().environment == "production"),
+        secure=(get_settings().environment != "test"),  # secure on production/staging, not in tests
         path="/api/auth/oauth",
     )
     return state
 
 
-def _build_authorize_url(provider: str, state_param: str) -> str:
+def _build_authorize_url(provider: str, state_param: str, request: Request = None) -> str:
     cfg = _provider_config(provider)
     client_id, _secret = _client_ids(provider)
     params = {
         "client_id": client_id,
-        "redirect_uri": _redirect_uri(provider),
+        "redirect_uri": _redirect_uri(provider, request),
         "response_type": "code",
         "scope": cfg["scope"],
         "state": state_param,
@@ -121,19 +150,20 @@ def _build_authorize_url(provider: str, state_param: str) -> str:
 
 
 @router.get("/{provider}/authorize")
-def authorize(provider: str, response: Response):
+def authorize(provider: str, request: Request, response: Response):
     cfg = _provider_config(provider)
     client_id, _secret = _client_ids(provider)
     if not client_id:
         return {"provider": provider, "configured": False,
                 "message": f"{provider.capitalize()} SSO is not configured. Add {cfg['client_id_env']} to your environment."}
     state = _state_cookie(response)
-    return {"provider": provider, "configured": True, "authorize_url": _build_authorize_url(provider, state)}
+    return {"provider": provider, "configured": True, "authorize_url": _build_authorize_url(provider, state, request)}
 
 
 @router.get("/{provider}/link")
 def link_authorize(
     provider: str,
+    request: Request,
     response: Response,
     user: User = Depends(get_current_user),
 ):
@@ -151,7 +181,7 @@ def link_authorize(
     return {
         "provider": provider,
         "configured": True,
-        "authorize_url": _build_authorize_url(provider, f"{state}:link:{user.id}"),
+        "authorize_url": _build_authorize_url(provider, f"{state}:link:{user.id}", request),
     }
 
 

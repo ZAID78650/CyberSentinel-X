@@ -121,7 +121,9 @@ def test_authorize_unconfigured_returns_helpful_message(client, oauth_unconfigur
 
 
 def test_authorize_sets_state_cookie_and_builds_redirect(client, oauth_configured):
-    r, state = _authorize(client, "google")
+    # Send with an Origin header so the dynamic origin detection kicks in
+    r = client.get("/api/auth/oauth/google/authorize", headers={"Origin": "http://localhost:5173"})
+    state = r.cookies.get("csx_oauth_state")
     assert r.json()["configured"] is True
     assert state, "expected csx_oauth_state cookie"
 
@@ -140,11 +142,12 @@ def test_authorize_sets_state_cookie_and_builds_redirect(client, oauth_configure
 def test_redirect_uri_origin_matches_cookie_origin(client, oauth_configured):
     """Regression: redirect_uri host must equal the frontend host where the
     state cookie is set — otherwise cross-origin login breaks even with creds."""
-    r, _state = _authorize(client, "github")
+    # When Origin header is provided, the redirect_uri uses it dynamically
+    r = client.get("/api/auth/oauth/github/authorize", headers={"Origin": "http://localhost:5173"})
     url = r.json()["authorize_url"]
     q = parse_qs(urlparse(url).query)
     redirect_host = urlparse(q["redirect_uri"][0]).netloc
-    assert redirect_host == "localhost:5173"  # frontend_url in FAKE_SETTINGS
+    assert redirect_host == "localhost:5173"  # matches Origin header
     assert redirect_host != "localhost:8000"  # backend_url must NOT be used
 
 

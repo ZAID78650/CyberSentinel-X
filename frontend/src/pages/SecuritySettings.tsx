@@ -23,6 +23,15 @@ interface TFAResult {
   warning?: string;
 }
 
+interface TFASetupData {
+  secret: string;
+  uri: string;
+  qr_data_uri: string;
+  enabled: boolean;
+  issuer: string;
+  account: string;
+}
+
 /** Wait for the Render backend to wake up by polling /health. */
 async function waitForBackend(maxAttempts = 3, delayMs = 3000): Promise<void> {
   for (let i = 0; i < maxAttempts; i++) {
@@ -72,12 +81,12 @@ function TFASetupPanel() {
   const setupMutation = useMutation({
     mutationFn: async () => {
       await waitForBackend();
-      const res = await api.get<{ secret: string; uri: string; enabled: boolean }>("/auth/2fa/setup");
+      const res = await api.get<TFASetupData>("/auth/2fa/setup");
       return res.data;
     },
     onSuccess: (data) => {
       setSecret(data.secret);
-      setQrUri(data.uri);
+      setQrUri(data.qr_data_uri || data.uri);
       setResult(null);
       setCopied(false);
       setError("");
@@ -106,7 +115,8 @@ function TFASetupPanel() {
   });
 
   const handleCopySecret = () => {
-    navigator.clipboard.writeText(secret);
+    // Copy without spaces for Google Authenticator compatibility
+    navigator.clipboard.writeText(secret.replace(/\s/g, ""));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -175,7 +185,7 @@ function TFASetupPanel() {
             </p>
             <div className="flex justify-center mb-4">
               <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUri)}`}
+                src={qrUri.startsWith("data:") ? qrUri : `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUri)}`}
                 alt="2FA QR Code"
                 className="rounded-lg bg-white p-2"
                 width={200}
@@ -188,7 +198,7 @@ function TFASetupPanel() {
                 onClick={handleCopySecret}
                 className="inline-flex items-center gap-2 rounded-lg border border-electric-500/30 bg-electric-500/10 px-4 py-2 font-mono text-sm text-electric-400 hover:bg-electric-500/20 transition-colors"
               >
-                <span className="tracking-[0.2em]">{secret}</span>
+                <span className="tracking-[0.15em]">{secret.match(/.{1,4}/g)?.join(' ') || secret}</span>
                 {copied ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
               </button>
             </div>

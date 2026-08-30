@@ -599,8 +599,8 @@ def get_2fa_config(user: User = Depends(get_current_user)):
 def setup_2fa(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Generate a new TOTP secret and provisioning URI for 2FA enrollment.
 
-    The secret is stored temporarily on the user record (not yet enabled).
-    The client should scan the QR code and then call /verify to activate.
+    Returns the secret, provisioning URI, and a server-generated QR code as
+    base64 data-URI so the frontend does not depend on external QR services.
     """
     secret = generate_secret()
     uri = get_provisioning_uri(secret, user.email)
@@ -610,7 +610,32 @@ def setup_2fa(db: Session = Depends(get_db), user: User = Depends(get_current_us
     user.tfa_verified = False
     db.merge(user)
     db.commit()
-    return {"secret": secret, "uri": uri, "enabled": False}
+
+    # Generate QR code as base64 data-URI (works with Google Authenticator)
+    qr_data_uri = ""
+    try:
+        import io, base64
+        import qrcode
+        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
+        qr.add_data(uri)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        qr_data_uri = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+    except Exception:
+        # Fallback: use external service
+        import urllib.parse
+        qr_data_uri = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(uri)}"
+
+    return {
+        "secret": secret,
+        "uri": uri,
+        "qr_data_uri": qr_data_uri,
+        "enabled": False,
+        "issuer": "CyberSentinel X",
+        "account": user.email,
+    }
 
 
 @router.post("/2fa/verify")

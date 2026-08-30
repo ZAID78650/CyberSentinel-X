@@ -199,7 +199,10 @@ export async function oauthProviders(): Promise<Array<{ provider: string; name: 
 
 export async function oauthAuthorize(provider: string): Promise<{ configured: boolean; authorize_url?: string; message?: string }> {
   try {
-    const res = await api.get(`/auth/oauth/${provider}/authorize`);
+    // Pass our own origin so the backend builds the callback URL pointing back here,
+    // not to a hardcoded value. Vercel rewrites strip the browser Origin header.
+    const frontendOrigin = window.location.origin;
+    const res = await api.get(`/auth/oauth/${provider}/authorize`, { params: { frontend_origin: frontendOrigin } });
     const data = res.data;
     // If backend is reachable but SSO is not configured, fall back to demo mode
     if (!data.configured) {
@@ -221,7 +224,7 @@ export async function oauthAuthorize(provider: string): Promise<{ configured: bo
 }
 
 export async function oauthLink(provider: string): Promise<{ configured: boolean; authorize_url?: string; message?: string }> {
-  try { const res = await api.get(`/auth/oauth/${provider}/link`); return res.data; }
+  try { const res = await api.get(`/auth/oauth/${provider}/link`, { params: { frontend_origin: window.location.origin } }); return res.data; }
   catch { return { configured: false, message: "Demo mode: OAuth linking simulated" }; }
 }
 

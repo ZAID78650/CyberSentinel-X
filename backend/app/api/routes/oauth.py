@@ -87,11 +87,16 @@ def _redirect_uri(provider: str, request: Request = None) -> str:
     browser to the callback on that same host, the cookie is sent, and nginx
     proxies the request (cookie intact) to the backend.
 
-    We dynamically derive the origin from the incoming request so that
-    Google OAuth callbacks always land on the same origin the user started
-    from (Vercel, Render, localhost — whichever they're on).
+    We accept a ``frontend_origin`` query parameter so the React app can
+    explicitly tell us its own origin.  Vercel rewrites strip the browser's
+    ``Origin`` header, so header-based detection alone won't work there.
     """
     if request:
+        # 1. Explicit query param from the frontend (most reliable)
+        frontend_origin = request.query_params.get("frontend_origin", "")
+        if frontend_origin:
+            return frontend_origin.rstrip("/") + f"/api/auth/oauth/{provider}/callback"
+        # 2. Try Origin / Referer / Host headers
         origin = _get_request_origin(request)
         if origin:
             return origin.rstrip("/") + f"/api/auth/oauth/{provider}/callback"

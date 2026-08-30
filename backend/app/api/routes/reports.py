@@ -148,7 +148,7 @@ def report_html(report_id: UUID, db: Session = Depends(get_db), _user: User = De
 @router.post("/enhanced/generate")
 def generate_enhanced(
     request: Request,
-    req: EnhancedReportRequest = None,
+    req: Optional[EnhancedReportRequest] = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

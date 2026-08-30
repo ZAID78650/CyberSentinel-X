@@ -1410,3 +1410,245 @@ def _get_uptime():
         return f"{hours}h {minutes}m"
     except:
         return "unknown"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SIH26184 CORE: WITHDRAWAL LOCATION PREDICTION
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get("/withdrawal/predict")
+def predict_withdrawal_locations(
+    top_n: int = Query(10, ge=1, le=50),
+    time_window_hours: int = Query(24, ge=1, le=168),
+):
+    """Core SIH26184 endpoint: Predict likely cash withdrawal locations.
+
+    Forecasts WHERE and WHEN cash withdrawals are likely to occur based on:
+    - Historical complaint geospatial clustering
+    - Temporal pattern analysis (time-of-day, day-of-week, velocity)
+    - Entity network correlation
+    - Risk-weighted zone scoring
+
+    Returns ranked predictions with explainable contributing factors
+    and actionable intervention recommendations.
+    """
+    from app.services.withdrawal_predictor import WithdrawalLocationPredictor
+
+    data = _get_data()
+    complaints = data.get("complaints", [])
+    transactions = data.get("transactions", [])
+
+    if not complaints:
+        return {
+            "predictions": [],
+            "temporal_patterns": [],
+            "recommendations": [],
+            "summary": {
+                "total_complaints": 0,
+                "message": "No complaint data available. Upload a dataset first.",
+            },
+        }
+
+    predictor = WithdrawalLocationPredictor()
+    result = predictor.predict_locations(
+        complaints=complaints,
+        transactions=transactions,
+        top_n=top_n,
+        time_window_hours=time_window_hours,
+    )
+
+    return result
+
+
+@router.get("/withdrawal/temporal")
+def analyze_temporal_patterns(
+    limit: int = Query(500, ge=10, le=5000),
+):
+    """Analyze temporal patterns in complaint/withdrawal activity.
+
+    Detects:
+    - Time-of-day peaks
+    - Day-of-week patterns
+    - Velocity trends
+    - Amount distribution patterns
+    """
+    from app.services.withdrawal_predictor import WithdrawalLocationPredictor
+
+    data = _get_data()
+    complaints = data.get("complaints", [])[:limit]
+
+    if not complaints:
+        return {"patterns": [], "message": "No complaint data available."}
+
+    predictor = WithdrawalLocationPredictor()
+    patterns = predictor._analyze_temporal_patterns(complaints)
+
+    return {
+        "patterns": [predictor._pattern_to_dict(p) for p in patterns],
+        "total_complaints_analyzed": len(complaints),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ENTITY NETWORK ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get("/entity/network")
+def analyze_entity_network(
+    limit: int = Query(500, ge=10, le=5000),
+):
+    """Analyze entity relationships between complaints, accounts,
+    transactions, devices, and locations.
+
+    Identifies:
+    - Accounts linked to multiple complaints
+    - Shared IPs across fraud attempts
+    - Geographic clusters
+    - Network density metrics
+    """
+    from app.services.withdrawal_predictor import EntityNetworkAnalyzer
+
+    data = _get_data()
+    complaints = data.get("complaints", [])[:limit]
+    transactions = data.get("transactions", [])
+
+    if not complaints:
+        return {"error": "No complaint data available."}
+
+    analyzer = EntityNetworkAnalyzer()
+    result = analyzer.analyze(complaints, transactions)
+
+    return {
+        **result,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PROACTIVE INTERVENTION RECOMMENDATIONS
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get("/intervention/recommend")
+def recommend_interventions(
+    top_n: int = Query(5, ge=1, le=20),
+):
+    """Generate actionable intervention recommendations based on
+    current predictions and temporal patterns.
+
+    Recommendations include:
+    - Deployment targets (surveillance, patrols)
+    - Priority levels (IMMEDIATE, HIGH, MEDIUM, LOW)
+    - Affected entities
+    - Estimated impact
+    - Deadlines
+    """
+    from app.services.withdrawal_predictor import WithdrawalLocationPredictor
+
+    data = _get_data()
+    complaints = data.get("complaints", [])
+    transactions = data.get("transactions", [])
+
+    if not complaints:
+        return {"recommendations": [], "message": "No data available."}
+
+    predictor = WithdrawalLocationPredictor()
+    result = predictor.predict_locations(complaints, transactions, top_n=top_n)
+
+    return {
+        "recommendations": result["recommendations"],
+        "temporal_alerts": [
+            p for p in result["temporal_patterns"]
+            if p["pattern_type"] == "velocity" and p["confidence"] > 0.5
+        ],
+        "summary": {
+            "total_recommendations": len(result["recommendations"]),
+            "immediate_actions": sum(1 for r in result["recommendations"] if r["priority"] == "IMMEDIATE"),
+            "high_priority": sum(1 for r in result["recommendations"] if r["priority"] == "HIGH"),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SIH DEMO ORCHESTRATOR
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.post("/demo/sih")
+def run_sih_demo():
+    """Run complete SIH demo pipeline for judges.
+
+    Demonstrates the full flow in ~2-3 minutes:
+    Complaint → Transaction → Anomaly → Entity → Geo → Prediction → Alert → Case → Audit
+
+    Clearly labeled as DEMO/SYNTHETIC DATA.
+    """
+    from app.services.withdrawal_predictor import SIHDemoOrchestrator, WithdrawalLocationPredictor
+
+    data = _get_data()
+    complaints = data.get("complaints", [])
+    transactions = data.get("transactions", [])
+
+    if not complaints:
+        # Generate synthetic demo data
+        complaints = _generate_demo_complaints()
+        transactions = _generate_demo_transactions()
+
+    predictor = WithdrawalLocationPredictor()
+    orchestrator = SIHDemoOrchestrator(predictor)
+    result = orchestrator.run_demo(complaints, transactions)
+
+    result["mode"] = "DEMO"
+    result["disclaimer"] = "This demonstration uses sample data. In production, all data is real."
+
+    return result
+
+
+def _generate_demo_complaints() -> List[Dict]:
+    """Generate synthetic complaints for demo mode."""
+    import random
+    indian_cities = [
+        {"city": "Mumbai", "state": "Maharashtra", "lat": 19.0760, "lng": 72.8777, "district": "Mumbai"},
+        {"city": "Delhi", "state": "Delhi", "lat": 28.6139, "lng": 77.2090, "district": "New Delhi"},
+        {"city": "Bangalore", "state": "Karnataka", "lat": 12.9716, "lng": 77.5946, "district": "Bangalore Urban"},
+        {"city": "Chennai", "state": "Tamil Nadu", "lat": 13.0827, "lng": 80.2707, "district": "Chennai"},
+        {"city": "Hyderabad", "state": "Telangana", "lat": 17.3850, "lng": 78.4867, "district": "Hyderabad"},
+        {"city": "Kolkata", "state": "West Bengal", "lat": 22.5726, "lng": 88.3639, "district": "Kolkata"},
+        {"city": "Pune", "state": "Maharashtra", "lat": 18.5204, "lng": 73.8567, "district": "Pune"},
+        {"city": "Ahmedabad", "state": "Gujarat", "lat": 23.0225, "lng": 72.5714, "district": "Ahmedabad"},
+        {"city": "Jaipur", "state": "Rajasthan", "lat": 26.9124, "lng": 75.7873, "district": "Jaipur"},
+        {"city": "Lucknow", "state": "Uttar Pradesh", "lat": 26.8467, "lng": 80.9462, "district": "Lucknow"},
+    ]
+    fraud_types = ["Phishing", "Identity Theft", "Crypto Scam", "UPI Fraud", "Card Skimming", "Bank Fraud"]
+
+    complaints = []
+    for i in range(50):
+        city = random.choice(indian_cities)
+        complaints.append({
+            "complaint_id": f"CMP-DEMO-{i+1:04d}",
+            "amount": random.randint(5000, 500000),
+            "latitude": city["lat"] + random.uniform(-0.1, 0.1),
+            "longitude": city["lng"] + random.uniform(-0.1, 0.1),
+            "state": city["state"],
+            "district": city["district"],
+            "fraud_type": random.choice(fraud_types),
+            "account_id": f"ACC-{random.randint(1000, 9999)}",
+            "risk_score": random.uniform(0.1, 0.95),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    return complaints
+
+
+def _generate_demo_transactions() -> List[Dict]:
+    """Generate synthetic transactions for demo mode."""
+    import random
+    transactions = []
+    for i in range(200):
+        transactions.append({
+            "transaction_id": f"TXN-DEMO-{i+1:04d}",
+            "account_id": f"ACC-{random.randint(1000, 9999)}",
+            "beneficiary_id": f"BEN-{random.randint(1000, 9999)}",
+            "amount": random.randint(1000, 200000),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    return transactions

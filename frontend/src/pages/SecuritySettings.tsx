@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle, Check, CheckCircle2, Copy, Key, RefreshCw,
-  Shield, ShieldCheck, ShieldOff, ShieldX, Smartphone,
+  Shield, ShieldCheck, ShieldOff,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { Card, Skeleton } from "../components/ui";
@@ -15,11 +15,6 @@ interface TFAStatus {
   has_secret: boolean;
 }
 
-interface TFASetup {
-  secret: string;
-  uri: string;
-  enabled: boolean;
-}
 
 interface TFAResult {
   valid: boolean;

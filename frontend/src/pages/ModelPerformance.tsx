@@ -1,15 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle, Brain, ChevronDown, Cpu, GitBranch, LineChart,
+  AlertTriangle, Cpu, GitBranch, LineChart,
   RefreshCcw, Shield, Target, TrendingUp, Zap,
 } from "lucide-react";
 import {
-  Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
-  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  Bar, BarChart, CartesianGrid, Cell,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { api, getErrorMessage } from "../services/api";
+import { api } from "../services/api";
 import { Card, EmptyState, Skeleton, StatCard } from "../components/ui";
 
 /* ── Types ─────────────────────────────────────────────────────────────── */

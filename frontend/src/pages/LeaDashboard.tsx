@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowRight, Building2, CheckCircle2, ChevronRight, Clock, Eye, FileText, Loader2, MapPin, Shield, Target, TrendingUp, Users, Zap,
+  AlertTriangle, ArrowRight, Building2, CheckCircle2, Clock, Eye, FileText, MapPin, Target, Zap,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { Card, EmptyState, Skeleton, StatCard } from "../components/ui";
@@ -94,7 +94,6 @@ function InterventionPipeline({ pipeline }: { pipeline: LeaData["intervention_wo
         {pipeline.map((stage, i) => {
           const isActive = stage.status === "active";
           const isCompleted = stage.status === "completed";
-          const isPending = stage.status === "pending";
           const color = isCompleted ? "#4ade80" : isActive ? "#38bdf8" : "#64748b";
 
           return (

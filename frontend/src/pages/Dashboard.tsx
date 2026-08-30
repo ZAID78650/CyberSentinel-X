@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,8 +6,8 @@ import {
   Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  AlertTriangle, Bot, Brain, ChevronRight, DollarSign, FileText as FileTextIcon, Loader2, MapPin, PlayCircle, Radar,
-  ShieldCheck, ShieldHalf, Siren, Target, TrendingUp, Zap,
+  AlertTriangle, Bot, ChevronRight, FileText as FileTextIcon, Loader2, PlayCircle, Radar,
+  ShieldCheck, ShieldHalf, Siren, Target, Zap,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { useSocket } from "../contexts/WebSocketContext";

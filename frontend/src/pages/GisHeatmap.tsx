@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle, ChevronRight, Filter, Info, Layers, MapPin, RefreshCw, TrendingUp, X, ZoomIn,
+  AlertTriangle, ChevronRight, Filter, Info, Layers, MapPin, RefreshCw, TrendingUp, X,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { Card, EmptyState, Skeleton, StatCard } from "../components/ui";
@@ -265,7 +265,6 @@ export default function GisHeatmap() {
   });
 
   const zones = data?.zones ?? [];
-  const highRisk = zones.filter((z) => z.level === "CRITICAL" || z.level === "HIGH");
 
   return (
     <div className="space-y-5">

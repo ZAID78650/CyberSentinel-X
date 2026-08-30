@@ -1,7 +1,7 @@
-import { useState } from "react";
+
 import { useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle, BarChart3, Brain, ChevronRight, CreditCard, DollarSign, Globe, Layers, MapPin, RefreshCw, TrendingUp,
+  AlertTriangle, Brain, ChevronRight, DollarSign, MapPin,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,

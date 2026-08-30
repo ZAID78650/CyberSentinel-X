@@ -4,7 +4,7 @@ import { Eye, EyeOff, Github, Loader2, Lock, Mail, ShieldCheck, Zap } from "luci
 import { HeroLogo } from "../components/Logo";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../components/ui/Toast";
-import { getErrorMessage, oauthAuthorize, oauthProviders, isDemoMode, tokenStore } from "../services/api";
+import { getErrorMessage, oauthAuthorize, oauthProviders, isDemoMode } from "../services/api";
 import { useTheme } from "../contexts/ThemeContext";
 import { Moon, Sun } from "lucide-react";
 import type { OAuthProviderStatus } from "../types";
@@ -21,7 +21,7 @@ function GoogleIcon({ className = "h-4 w-4" }: { className?: string }) {
 }
 
 export default function Login() {
-  const { login, loginWithOAuth } = useAuth();
+  const { login } = useAuth();
   const { success, warning, error, info } = useToast();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");

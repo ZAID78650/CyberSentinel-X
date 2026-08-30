@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  AlertTriangle, BadgeCheck, BookOpen, Clock, Download, Eye, FileText,
-  Filter, Shield, ShieldAlert, ShieldCheck, ShieldOff, Sparkles, 
-  RefreshCw, X, Key, ChevronRight, ExternalLink, BarChart3,
+  BookOpen, Clock, Download, Eye, FileText,
+  Shield, ShieldAlert, ShieldCheck, Sparkles, 
+  RefreshCw, X, Key, ChevronRight, BarChart3,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { useToast } from "../components/ui/Toast";
@@ -15,8 +15,8 @@ import type { Incident, Paginated, Report, ReportDetail } from "../types";
 
 function TwoFactorGate({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: () => void }) {
   const [code, setCode] = useState("");
-  const { error, setError } = useToast();
-  const [loading, setLoading] = useState(false);
+  const { error: toastError } = useToast();
+  const [, setLoading] = useState(false);
 
   const verify = async () => {
     if (code.length !== 6) return;
@@ -29,7 +29,7 @@ function TwoFactorGate({ onSuccess, onCancel }: { onSuccess: () => void; onCance
       if (err?.response?.status === 400 && err?.response?.data?.detail?.includes("not set up")) {
         onSuccess();
       } else {
-        setError("Verification failed", getErrorMessage(err));
+        toastError("Verification failed", getErrorMessage(err));
       }
     } finally {
       setLoading(false);
@@ -364,16 +364,6 @@ export default function IncidentReports() {
     const inc = r as any;
     return inc.severity?.toUpperCase() === sevFilter;
   }) || [];
-
-  const generateMutationSingle = useMutation({
-    mutationFn: async (id: string) => (await api.post(`/reports/${id}/generate`)).data,
-    onSuccess: (data) => {
-      success("Generated", data.report?.report_id || "Done");
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      setViewing(data);
-    },
-    onError: (err: unknown) => toastError("Failed", getErrorMessage(err)),
-  });
 
   return (
     <div className="space-y-5">

@@ -1,35 +1,101 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import {
-  BookOpen, Clock, Download, Eye, FileText,
-  Shield, ShieldAlert, ShieldCheck, Sparkles, 
-  RefreshCw, X, Key, ChevronRight, BarChart3,
+  BookOpen, Clock, Download, FileText, Shield, ShieldCheck,
+  ShieldAlert, Sparkles, RefreshCw, Eye, CheckCircle2, Lock,
+  BarChart3, ChevronRight, Hash, QrCode, Key,
 } from "lucide-react";
 import { api, getErrorMessage } from "../services/api";
 import { useToast } from "../components/ui/Toast";
 import { Card, EmptyState, Modal, Skeleton, SeverityBadge, StatusBadge } from "../components/ui";
-import type { Incident, Paginated, Report, ReportDetail } from "../types";
+import type { Incident, Paginated } from "../types";
 
-/* ── 2FA Gate Component ────────────────────────────────────────────────── */
+/* ── Types ────────────────────────────────────────────────────────────── */
+
+interface ReportData {
+  report_id: string;
+  title: string;
+  severity: string;
+  created_at: string;
+  created_by: string;
+  id?: string;
+  incident_id?: string;
+  content?: any;
+  pdf_available?: boolean;
+}
+
+interface EnhancedReport {
+  report_id: string;
+  html_content: string;
+  pdf_available: boolean;
+  pdf_url: string | null;
+  integrity_hash: string;
+  classification: string;
+  tfa_verified: boolean;
+  generated_by: string;
+  generated_at: string;
+  data_summary: {
+    incidents: number;
+    complaints: number;
+    transactions: number;
+    total_amount: number;
+    risk_level: string;
+  };
+  processing_time_s: number;
+}
+
+/* ── Helpers ──────────────────────────────────────────────────────────── */
+
+async function waitForBackend(maxAttempts = 3, delayMs = 2000): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 6000);
+      const res = await fetch("/health", { signal: c.signal });
+      clearTimeout(t);
+      if (res.ok) return;
+    } catch { /* waking up */ }
+    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs));
+  }
+}
+
+async function postWithRetry<T>(url: string, body: unknown, retries = 2): Promise<{ data: T }> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await api.post<T>(url, body);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number } };
+      const status = axiosErr.response?.status;
+      if (attempt < retries && (!status || status === 502 || status === 503)) {
+        await waitForBackend(1, 2000);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Unreachable");
+}
+
+/* ── 2FA Gate ─────────────────────────────────────────────────────────── */
 
 function TwoFactorGate({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: () => void }) {
   const [code, setCode] = useState("");
-  const { error: toastError } = useToast();
-  const [, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const verify = async () => {
     if (code.length !== 6) return;
     setLoading(true);
+    setError("");
     try {
+      await waitForBackend();
       await api.post("/auth/2fa/verify", { code, action: "verify" });
       onSuccess();
     } catch (err: any) {
-      // If 2FA isn't set up, allow generation anyway for demo
       if (err?.response?.status === 400 && err?.response?.data?.detail?.includes("not set up")) {
-        onSuccess();
+        onSuccess(); // 2FA not configured, allow anyway
       } else {
-        toastError("Verification failed", getErrorMessage(err));
+        setError(getErrorMessage(err));
       }
     } finally {
       setLoading(false);
@@ -44,282 +110,136 @@ function TwoFactorGate({ onSuccess, onCancel }: { onSuccess: () => void; onCance
         </div>
         <div>
           <h3 className="text-sm font-bold text-amber-400">Security Verification Required</h3>
-          <p className="text-xs text-slate-400">Enter your 2FA code to generate this report</p>
+          <p className="text-xs text-slate-400">Enter your 6-digit 2FA code to generate this report</p>
         </div>
       </div>
-
-      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
-        <p className="text-xs text-slate-400 mb-3">
-          Sensitive incident reports require two-factor authentication to generate and view.
-          This ensures that only authorized personnel can access investigation data.
-        </p>
-        <div className="flex gap-3">
-          <input
-            type="text"
-            className="input flex-1 text-center text-lg tracking-[0.3em] font-mono"
-            placeholder="Enter 6-digit code"
-            maxLength={6}
-            autoFocus
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && code.length === 6) verify();
-              if (e.key === "Escape") onCancel();
-            }}
-          />
-          <button
-            className="btn-ghost px-3 py-2"
-            onClick={onCancel}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 text-xs text-slate-500">
-        <Shield className="h-3.5 w-3.5" />
-        <span>
-          This verification ensures report access is logged and auditable.
-          <button onClick={onCancel} className="ml-1 text-electric-400 hover:underline">Go back</button>
-        </span>
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">{error}</div>
+      )}
+      <div className="flex gap-3">
+        <input
+          type="text"
+          className="input flex-1 text-center text-lg tracking-[0.3em] font-mono"
+          placeholder="000000"
+          maxLength={6}
+          autoFocus
+          value={code}
+          onChange={(e) => { setCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6)); setError(""); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && code.length === 6) verify(); if (e.key === "Escape") onCancel(); }}
+        />
+        <button className="btn-primary" disabled={code.length !== 6 || loading} onClick={verify}>
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <><Lock className="h-4 w-4 mr-1" /> Verify</>}
+        </button>
+        <button className="btn-ghost px-3" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   );
 }
 
-/* ── Report Preview Panel ─────────────────────────────────────────────── */
+/* ── Report Viewer (HTML preview with biometric elements) ─────────────── */
 
-function ReportPreview({ report, onClose, onDownload, verifying, onVerifyClick }: {
-  report: ReportDetail;
-  onClose: () => void;
-  onDownload: () => void;
-  verifying: boolean;
-  onVerifyClick: () => void;
-}) {
-  const inc = report.content.incident as Record<string, any> | undefined;
-  const risk = report.content.risk as Record<string, any> | undefined;
-  const investigation = report.content.investigation as Record<string, any> | undefined;
-  const mitre = (report.content.mitre || []) as Record<string, string>[];
-  const recommendations = (report.content.recommendations || []) as Record<string, string>[];
-  const timeline = (report.content.timeline || []) as Record<string, any>[];
-  const affected = (report.content.affected || {}) as Record<string, string[]>;
-
-  const severityColor: Record<string, string> = {
-    CRITICAL: "text-red-400 bg-red-500/10 border-red-500/30",
-    HIGH: "text-orange-400 bg-orange-500/10 border-orange-500/30",
-    MEDIUM: "text-yellow-400 bg-yellow-500/10 border-yellow-300/30",
-    LOW: "text-green-400 bg-green-500/10 border-green-500/30",
-  };
-
+function ReportViewer({ report, onClose }: { report: EnhancedReport; onClose: () => void }) {
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-white">{report.report.title}</h2>
-          <p className="mt-1 text-sm text-slate-400">{report.report.incident_id}</p>
+    <div className="space-y-4">
+      {/* Biometric Header */}
+      <div className="flex items-center gap-4 rounded-xl border border-electric-500/20 bg-electric-500/5 p-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-electric-500/20">
+          <ShieldCheck className="h-6 w-6 text-electric-400" />
         </div>
-        <div className="flex gap-2">
-          <button onClick={onClose} className="btn-ghost px-3 py-1.5 text-xs">
-            <X className="h-4 w-4 mr-1" />Close
-          </button>
-          {report.pdf_available ? (
-            <button onClick={onDownload} className="btn-primary text-xs">
-              <Download className="h-4 w-4 mr-1" /> Download PDF
-            </button>
-          ) : (
-            <button onClick={onVerifyClick} disabled={verifying} className="btn-primary text-xs">
-              {verifying ? <RefreshCw className="h-4 w-4 animate-spin mr-1" /> : <Shield className="h-4 w-4 mr-1" />}
-              Generate Report
-            </button>
-          )}
+        <div className="flex-1">
+          <h3 className="text-sm font-bold text-white">Official Intelligence Report</h3>
+          <p className="text-xs text-slate-400 font-mono mt-1">{report.report_id}</p>
         </div>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="rounded-lg bg-night-800/60 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Status</p>
-          <StatusBadge status={inc?.status} />
-        </div>
-        <div className="rounded-lg bg-night-800/60 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Severity</p>
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${severityColor[inc?.severity] || 'text-gray-400'}`}>
-            {inc?.severity || 'N/A'}
+        <div className="text-right">
+          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold ${
+            report.tfa_verified ? "bg-green-500/10 text-green-400 border border-green-500/30" : "bg-amber-500/10 text-amber-400 border border-amber-500/30"
+          }`}>
+            {report.tfa_verified ? "✓ 2FA VERIFIED" : "⚠ NO 2FA"}
           </span>
-        </div>
-        <div className="rounded-lg bg-night-800/60 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Risk Score</p>
-          <p className="font-mono text-xl font-bold text-electric-400">
-            {risk?.score ?? '—'}
-            <span className="text-xs font-normal text-slate-500 ml-1">/100</span>
-          </p>
-        </div>
-        <div className="rounded-lg bg-night-800/60 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Confidence</p>
-          <p className="font-mono text-xl font-bold text-green-400">
-            {risk?.confidence != null ? `${(risk.confidence * 100).toFixed(0)}%` : '—'}
-          </p>
+          <p className="text-[10px] text-slate-500 mt-1">{report.classification}</p>
         </div>
       </div>
 
-      {/* Investigation Summary */}
-      {investigation?.summary && (
-        <div className="rounded-xl border border-electric-500/20 bg-electric-500/5 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="h-4 w-4 text-electric-400" />
-            <h4 className="text-sm font-bold text-electric-400">AI Investigation Summary</h4>
+      {/* Data Summary */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { label: "Incidents", value: report.data_summary.incidents, color: "text-electric-400" },
+          { label: "Complaints", value: report.data_summary.complaints.toLocaleString(), color: "text-white" },
+          { label: "Transactions", value: report.data_summary.transactions.toLocaleString(), color: "text-white" },
+          { label: "Risk Level", value: report.data_summary.risk_level, color: report.data_summary.risk_level === "CRITICAL" ? "text-red-400" : "text-amber-400" },
+        ].map(s => (
+          <div key={s.label} className="rounded-lg bg-night-800/60 p-3 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">{s.label}</p>
+            <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
           </div>
-          <p className="text-sm text-slate-300 leading-relaxed">{investigation.summary}</p>
-          {investigation.verdict && (
-            <div className="mt-3 flex items-center gap-3">
-              <span className="px-2 py-0.5 rounded text-xs font-bold bg-electric-500/20 text-electric-300">
-                {investigation.verdict}
-              </span>
-              <span className="text-xs text-slate-400">
-                {investigation.confidence ? `${(investigation.confidence * 100).toFixed(0)}% confidence` : ''}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Affected Entities */}
-      {affected && (affected.users?.length || affected.devices?.length || affected.ips?.length || affected.assets?.length) > 0 && (
-        <div>
-          <h4 className="text-sm font-bold text-slate-200 mb-2">Affected Entities</h4>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: "Users", items: affected.users, icon: "👤" },
-              { label: "Devices", items: affected.devices, icon: "💻" },
-              { label: "IPs", items: affected.ips, icon: "🌐" },
-              { label: "Assets", items: affected.assets, icon: "🏢" },
-            ].filter(e => e.items && e.items.length > 0).map(item => (
-              <div key={item.label} className="rounded-lg border border-night-700/70 bg-night-850/50 p-3">
-                <p className="text-[10px] font-bold uppercase text-slate-500 mb-1">{item.icon} {item.label}</p>
-                <div className="space-y-0.5">
-                  {item.items!.slice(0, 3).map((v, i) => (
-                    <p key={i} className="text-xs font-mono text-slate-300 truncate">{v}</p>
-                  ))}
-                  {item.items!.length > 3 && (
-                    <p className="text-[10px] text-slate-500">+{item.items!.length - 3} more</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* MITRE ATT&CK + Recommendations in 2-col */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {mitre.length > 0 && (
-          <div>
-            <h4 className="text-sm font-bold text-slate-200 mb-2 flex items-center gap-1.5">
-              <span className="text-red-400">🎯</span> MITRE ATT&CK
-            </h4>
-            <div className="space-y-1.5">
-              {mitre.map((m: Record<string, string>, i: number) => (
-                <div key={i} className="flex items-start gap-2 rounded bg-night-850/50 px-3 py-2 text-xs">
-                  <code className="shrink-0 text-electric-400 font-mono">{m.technique_id || m.id || 'N/A'}</code>
-                  <span className="text-slate-300">{m.name || 'Unknown'}</span>
-                  {m.tactic && <span className="ml-auto text-[10px] text-slate-500 italic">{m.tactic}</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {recommendations.length > 0 && (
-          <div>
-            <h4 className="text-sm font-bold text-slate-200 mb-2 flex items-center gap-1.5">
-              <span className="text-green-400">✓</span> Recommended Actions
-            </h4>
-            <div className="space-y-1.5">
-              {recommendations.map((r: Record<string, string>, i: number) => (
-                <div key={i} className="flex items-start gap-2 rounded bg-night-850/50 px-3 py-2 text-xs">
-                  <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    r.priority === 'HIGH' ? 'bg-red-500/20 text-red-400' :
-                    r.priority === 'MEDIUM' ? 'bg-yellow-500/20 text-yellow-400' :
-                    'bg-green-500/20 text-green-400'
-                  }`}>
-                    {r.priority || 'N/A'}
-                  </span>
-                  <span className="text-slate-300">{r.action}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        ))}
       </div>
 
-      {/* Timeline */}
-      {timeline.length > 0 && (
-        <div>
-          <h4 className="text-sm font-bold text-slate-200 mb-2 flex items-center gap-1.5">
-            <span className="text-yellow-400">⏱</span> Event Timeline
-          </h4>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left">
-                  <th className="pb-2 pr-4 text-[10px] font-semibold uppercase text-slate-500">Time</th>
-                  <th className="pb-2 px-4 text-[10px] font-semibold uppercase text-slate-500">Event</th>
-                  <th className="pb-2 px-4 text-[10px] font-semibold uppercase text-slate-500">Severity</th>
-                  <th className="pb-2 px-4 text-[10px] font-semibold uppercase text-slate-500">Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {timeline.slice(0, 8).map((t: Record<string, any>, i: number) => (
-                  <tr key={i} className="border-t border-night-800/50">
-                    <td className="py-2 pr-4 font-mono text-slate-500 text-[11px]">
-                      {t.timestamp ? new Date(t.timestamp).toLocaleString() : '—'}
-                    </td>
-                    <td className="py-2 px-4 text-slate-300">{t.event_type || '—'}</td>
-                    <td className="py-2 px-4">
-                      {t.severity && (
-                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${severityColor[t.severity] || ''}`}>
-                          {t.severity}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 px-4 font-mono text-slate-500 text-[11px]">{t.source_ip || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {/* Integrity Block */}
+      <div className="rounded-lg border border-night-700/70 bg-night-900/60 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Hash className="h-4 w-4 text-electric-400" />
+          <span className="text-xs font-bold text-slate-200">Document Integrity</span>
         </div>
-      )}
+        <div className="space-y-1 font-mono text-[10px] text-slate-500">
+          <p>Report: {report.report_id}</p>
+          <p>HMAC-SHA256: <span className="text-electric-400 break-all">{report.integrity_hash?.slice(0, 64) || "N/A"}...</span></p>
+          <p>Generated: {report.generated_at} by {report.generated_by}</p>
+        </div>
+      </div>
 
-      {/* Hash & Meta */}
-      <div className="flex items-center justify-between rounded-lg bg-night-900/60 p-3 text-[11px] text-slate-500">
-        <span>Generated: {report.report.created_at ? new Date(report.report.created_at).toLocaleString() : '—'}</span>
-        <span>By: {report.report.created_by || 'System'}</span>
+      {/* Actions */}
+      <div className="flex items-center gap-3">
+        {report.pdf_available && report.pdf_url && (
+          <a
+            href={report.pdf_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-primary"
+          >
+            <Download className="h-4 w-4 mr-1" /> Download PDF
+          </a>
+        )}
+        <button
+          className="btn-ghost"
+          onClick={() => {
+            // Open HTML report in new tab
+            const blob = new Blob([report.html_content], { type: "text/html" });
+            const url = URL.createObjectURL(blob);
+            window.open(url, "_blank");
+          }}
+        >
+          <Eye className="h-4 w-4 mr-1" /> View Full Report
+        </button>
+        <button className="btn-ghost ml-auto" onClick={onClose}>Close</button>
+      </div>
+
+      {/* HTML Preview */}
+      <div className="rounded-xl border border-night-700/70 overflow-hidden" style={{ height: "60vh" }}>
+        <iframe
+          srcDoc={report.html_content}
+          className="w-full h-full border-0"
+          title="Report Preview"
+        />
       </div>
     </div>
   );
 }
 
-/* ── Main Component ────────────────────────────────────────────────────── */
+/* ── Main Page ────────────────────────────────────────────────────────── */
 
 export default function IncidentReports() {
   const { success, error: toastError } = useToast();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [page, setPage] = useState(1);
-  const [busyIncident, setBusyIncident] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<ReportDetail | null>(null);
+  const [viewing, setViewing] = useState<EnhancedReport | null>(null);
   const [showTfaVerify, setShowTfaVerify] = useState(false);
-  const [pendingIncident, setPendingIncident] = useState<string | null>(null);
-  const [sevFilter, setSevFilter] = useState("");
+  const [generating, setGenerating] = useState(false);
 
-  const { data: reports, isLoading: reportsLoading } = useQuery({
-    queryKey: ["reports", page],
-    queryFn: async () => (await api.get<Paginated<Report>>("/reports", { params: { page, page_size: 12 } })).data,
-  });
+  const warmUp = async () => { try { await api.get("/health"); } catch { /* */ } };
 
-  const { data: incidents } = useQuery({
+  // Fetch incidents
+  const { data: incidents, isLoading: incidentsLoading } = useQuery({
     queryKey: ["incidents", "reports"],
     queryFn: async () => {
       const res = await api.get<Paginated<Incident>>("/incidents", { params: { page: 1, page_size: 50 } });
@@ -327,48 +247,43 @@ export default function IncidentReports() {
     },
   });
 
-  const warmUp = async () => {
-    try { await api.get("/health"); } catch { /* ignore */ }
-  };
-
+  // Auto-generate report from incidents
   const generateMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await warmUp();
-      return (await api.post(`/reports/${id}/generate`)).data;
+    mutationFn: async () => {
+      await waitForBackend();
+      setGenerating(true);
+      const res = await postWithRetry<EnhancedReport>("/reports/enhanced/generate", {
+        tfa_code: null,
+        classification: "CONFIDENTIAL",
+      }, 2);
+      return res.data;
     },
     onSuccess: (data) => {
-      success("Report generated", `Report ${data.report?.report_id || ''} created successfully`);
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      if (data && data.report) {
-        setViewing(data);
-      }
+      setViewing(data);
+      setGenerating(false);
+      success("Report Generated", `Report ${data.report_id} created with ${data.data_summary.incidents} incidents`);
     },
     onError: (err: any) => {
-      toastError("Generation failed", getErrorMessage(err));
+      setGenerating(false);
+      toastError("Generation Failed", getErrorMessage(err));
     },
   });
 
-  const handleGenerateClick = (id: string) => {
-    setPendingIncident(id);
+  const handleGenerate = () => {
     setShowTfaVerify(true);
   };
 
-  const handleVerifySuccess = () => {
-    if (pendingIncident) {
-      setBusyIncident(pendingIncident);
-      generateMutation.mutate(pendingIncident, {
-        onSettled: () => setBusyIncident(null),
-      });
-    }
+  const handleTfaSuccess = () => {
     setShowTfaVerify(false);
-    setPendingIncident(null);
+    generateMutation.mutate();
   };
 
-  const filteredReports = reports?.items?.filter(r => {
-    if (!sevFilter) return true;
-    const inc = r as any;
-    return inc.severity?.toUpperCase() === sevFilter;
-  }) || [];
+  // Auto-generate on first load if there are incidents but no reports
+  useEffect(() => {
+    if (incidents && incidents.items.length > 0 && !viewing && !generating) {
+      // Don't auto-generate — let user click the button
+    }
+  }, [incidents]);
 
   return (
     <div className="space-y-5">
@@ -378,189 +293,176 @@ export default function IncidentReports() {
           <FileText className="h-5 w-5 text-white" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-white">Security Reports</h1>
-          <p className="text-sm text-slate-400">Intelligence reports with AI analysis and audit trail</p>
+          <h1 className="text-xl font-bold text-white">Intelligence Reports</h1>
+          <p className="text-sm text-slate-400">Auto-generated from incidents with biometric verification</p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Shield className="h-4 w-4 text-green-400" />
-          <span className="text-xs text-green-400 font-medium">2FA Protected</span>
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-xs text-green-400">
+            <Shield className="h-3.5 w-3.5" />
+            <span>2FA Protected</span>
+          </div>
+          <button
+            className="btn-primary"
+            disabled={generating || generateMutation.isPending}
+            onClick={handleGenerate}
+          >
+            {generating || generateMutation.isPending ? (
+              <><RefreshCw className="h-4 w-4 animate-spin mr-1" /> Generating Report...</>
+            ) : (
+              <><Sparkles className="h-4 w-4 mr-1" /> Auto-Generate Report</>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* 2FA Modal */}
+      {/* 2FA Gate */}
       {showTfaVerify && (
         <Card className="border-amber-500/30 bg-amber-500/5">
           <TwoFactorGate
-            onSuccess={handleVerifySuccess}
-            onCancel={() => { setShowTfaVerify(false); setPendingIncident(null); }}
+            onSuccess={handleTfaSuccess}
+            onCancel={() => setShowTfaVerify(false)}
           />
         </Card>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        {/* Reports List */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-electric-400" />
-              <span className="text-sm font-bold text-slate-200">Generated Reports</span>
-              {reports && <span className="text-xs text-slate-500">({reports.total})</span>}
+      {/* Loading state */}
+      {(generating || generateMutation.isPending) && (
+        <Card className="border-electric-500/30 bg-electric-500/5">
+          <div className="flex items-center gap-4 p-2">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-electric-500/20">
+              <RefreshCw className="h-5 w-5 text-electric-400 animate-spin" />
             </div>
-            <div className="flex items-center gap-2">
-              <select
-                className="input !w-32 !py-1.5 !text-xs"
-                value={sevFilter}
-                onChange={(e) => setSevFilter(e.target.value)}
-              >
-                <option value="">All Levels</option>
-                {["CRITICAL", "HIGH", "MEDIUM", "LOW"].map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+            <div>
+              <p className="text-sm font-semibold text-electric-300">Auto-generating intelligence report...</p>
+              <p className="text-xs text-slate-500">Collecting incident data, running analysis, generating biometric stamps</p>
             </div>
           </div>
+        </Card>
+      )}
 
-          {reportsLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}
-            </div>
-          ) : filteredReports.length === 0 ? (
-            <Card>
-              <EmptyState
-                icon={<FileText className="h-8 w-8" />}
-                title="No reports yet"
-                description="Generate a security report from an incident to get started. Reports include AI analysis, MITRE mappings, and audit trails."
-              />
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {filteredReports.map((r) => {
-                const inc = r as any;
-                return (
-                  <div
-                    key={r.id}
-                    className="group flex items-center gap-4 rounded-xl border border-night-700/60 bg-night-900/40 p-4 transition-all hover:border-electric-500/30 hover:bg-night-900/70 cursor-pointer"
-                    onClick={() => setViewing(null)}
-                  >
-                    <div className="shrink-0 w-10 h-10 rounded-lg bg-night-800 flex items-center justify-center">
-                      <FileText className="h-5 w-5 text-electric-400/70" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold text-slate-200 truncate">{r.title}</p>
-                        {inc.severity && <SeverityBadge severity={inc.severity} />}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-500">
-                        <span className="font-mono text-electric-400/70">{r.report_id}</span>
-                        <span>•</span>
-                        <Clock className="h-3 w-3" />
-                        <span>{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</span>
-                        <span>•</span>
-                        <span>By {r.created_by || 'System'}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        className="flex items-center gap-1 rounded-lg border border-electric-500/30 bg-electric-500/10 px-3 py-1.5 text-xs font-medium text-electric-400 hover:bg-electric-500/20 transition-colors"
-                        onClick={(e) => { e.stopPropagation(); setViewing(null); }}
-                      >
-                        <Eye className="h-3.5 w-3.5" /> View
-                      </button>
-                      <button
-                        className="flex items-center gap-1 rounded-lg border border-night-600 bg-night-700/50 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-night-600/80 transition-colors"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateClick(r.id as string);
-                        }}
-                      >
-                        <Download className="h-3.5 w-3.5" /> PDF
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {reports && reports.pages > 1 && (
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-500">
-                Page {reports.page} of {reports.pages} · {reports.total} total
-              </span>
-              <div className="flex gap-2">
-                <button
-                  className="btn-ghost text-xs"
-                  disabled={page <= 1}
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                >
-                  ← Prev
-                </button>
-                <button
-                  className="btn-ghost text-xs"
-                  disabled={page >= reports.pages}
-                  onClick={() => setPage(p => Math.min(reports.pages, p + 1))}
-                >
-                  Next →
-                </button>
+      <div className="grid gap-5 lg:grid-cols-3">
+        {/* Left: Recent incidents + reports */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Incidents to generate reports from */}
+          <Card title="🎯 Recent Incidents" subtitle="Select an incident or auto-generate from all">
+            {incidentsLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map(i => <Skeleton key={i} className="h-16 rounded-lg" />)}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right sidebar: Quick Generate + Security Info */}
-        <div className="space-y-4">
-          <Card title="⚡ Quick Generate" subtitle="Create a report from an existing incident">
-            {incidents && incidents.items.length > 0 ? (
+            ) : incidents && incidents.items.length > 0 ? (
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {incidents.items.slice(0, 8).map((inc) => (
-                  <div key={inc.id} className="flex items-center gap-3 rounded-lg border border-night-700/50 bg-night-850/40 p-3 transition hover:border-electric-500/30">
+                {incidents.items.slice(0, 10).map((inc) => (
+                  <div key={inc.id} className="flex items-center gap-3 rounded-lg border border-night-700/50 bg-night-850/40 p-3 hover:border-electric-500/30 transition-colors">
+                    <div className="shrink-0 w-8 h-8 rounded bg-night-800 flex items-center justify-center">
+                      <FileText className="h-4 w-4 text-electric-400/60" />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-slate-200 truncate">{inc.title}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] font-mono text-electric-400/70">{inc.incident_id?.slice(0, 8)}</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] font-mono text-electric-400/70">{inc.incident_id?.slice(0, 12)}</span>
+                        <SeverityBadge severity={inc.severity} />
                         <StatusBadge status={inc.status} />
                       </div>
                     </div>
-                    <button
-                      className="shrink-0 flex items-center gap-1 rounded-lg border border-electric-500/20 bg-electric-500/10 px-2.5 py-1.5 text-[11px] font-medium text-electric-400 hover:bg-electric-500/20 disabled:opacity-40"
-                      disabled={busyIncident !== null}
-                      onClick={() => handleGenerateClick(inc.id)}
-                    >
-                      {busyIncident === inc.id ? (
-                        <><RefreshCw className="h-3 w-3 animate-spin" /> <span>Gen...</span></>
-                      ) : (
-                        <>
-                          <Shield className="h-3 w-3" /> Generate
-                        </>
-                      )}
-                    </button>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-500">No incidents available. Create an incident first.</p>
+              <EmptyState
+                icon={<FileText className="h-6 w-6" />}
+                title="No incidents yet"
+                description="Run a simulation or upload data to create incidents, then generate reports."
+              />
             )}
           </Card>
 
-          {/* Security Info */}
-          <Card title="🔐 Report Security" subtitle="2FA verification for report access">
-            <div className="space-y-3">
-              <div className="flex items-start gap-2 text-xs text-slate-400">
-                <ShieldCheck className="h-4 w-4 shrink-0 text-green-400 mt-0.5" />
-                <p>Generating and viewing reports requires two-factor authentication. This ensures only authorized personnel can access sensitive investigation data.</p>
+          {/* Generated reports */}
+          <Card title="📋 Generated Reports" subtitle="Official intelligence reports with biometric verification">
+            {viewing ? (
+              <ReportViewer report={viewing} onClose={() => setViewing(null)} />
+            ) : (
+              <div className="text-center py-8">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-night-800 mx-auto mb-4">
+                  <FileText className="h-8 w-8 text-slate-600" />
+                </div>
+                <p className="text-sm text-slate-400 mb-2">No report generated yet</p>
+                <p className="text-xs text-slate-500 mb-4">
+                  Click "Auto-Generate Report" to create a professional intelligence report
+                  from all incidents, with biometric stamps and HMAC integrity verification.
+                </p>
+                <button
+                  className="btn-primary"
+                  disabled={generating || generateMutation.isPending}
+                  onClick={handleGenerate}
+                >
+                  <Sparkles className="h-4 w-4 mr-1" /> Auto-Generate Report
+                </button>
               </div>
+            )}
+          </Card>
+        </div>
+
+        {/* Right sidebar */}
+        <div className="space-y-4">
+          {/* Quick Generate */}
+          <Card title="⚡ Quick Generate" subtitle="One-click report from all incidents">
+            <div className="space-y-3">
+              <p className="text-xs text-slate-400">
+                Generate a comprehensive intelligence report from all {incidents?.items.length || 0} incidents,
+                including fraud analysis, geographic distribution, and risk assessment.
+              </p>
               <button
-                onClick={() => navigate("/security-settings")}
-                className="flex items-center gap-1.5 text-xs text-electric-400 hover:text-electric-300 transition-colors"
+                className="w-full btn-primary"
+                disabled={generating || generateMutation.isPending}
+                onClick={handleGenerate}
               >
-                <Key className="h-3.5 w-3.5" /> Configure 2FA Settings
+                {generating ? (
+                  <><RefreshCw className="h-4 w-4 animate-spin mr-1" /> Generating...</>
+                ) : (
+                  <><Sparkles className="h-4 w-4 mr-1" /> Generate Full Report</>
+                )}
+              </button>
+            </div>
+          </Card>
+
+          {/* Report Features */}
+          <Card title="🔐 Report Features" subtitle="Professional biometric elements">
+            <div className="space-y-2.5">
+              {[
+                { icon: <ShieldCheck className="h-4 w-4 text-green-400" />, text: "HMAC-SHA256 integrity signature" },
+                { icon: <QrCode className="h-4 w-4 text-electric-400" />, text: "QR code verification link" },
+                { icon: <Lock className="h-4 w-4 text-amber-400" />, text: "2FA authorization badge" },
+                { icon: <FileText className="h-4 w-4 text-blue-400" />, text: "Official CONFIDENTIAL stamp" },
+                { icon: <Shield className="h-4 w-4 text-purple-400" />, text: "CyberSentinel-X official seal" },
+                { icon: <Hash className="h-4 w-4 text-cyan-400" />, text: "Tamper-evident watermark" },
+              ].map((f, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-slate-400">
+                  {f.icon}
+                  <span>{f.text}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Security */}
+          <Card title="🔒 Security" subtitle="2FA protection for reports">
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400">
+                Reports are protected by two-factor authentication. Each report includes
+                a digital signature, HMAC integrity hash, and audit trail.
+              </p>
+              <button
+                onClick={() => window.location.href = "/security-settings"}
+                className="flex items-center gap-1.5 text-xs text-electric-400 hover:text-electric-300"
+              >
+                <Key className="h-3.5 w-3.5" /> Configure 2FA
               </button>
             </div>
           </Card>
 
           {/* Quick Links */}
           <Card title="🔗 Quick Links">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {[
                 { label: "Incident Dashboard", to: "/incidents", icon: <BarChart3 className="h-3.5 w-3.5" /> },
                 { label: "Evidence Ledger", to: "/evidence-ledger", icon: <BookOpen className="h-3.5 w-3.5" /> },
@@ -568,7 +470,7 @@ export default function IncidentReports() {
               ].map(link => (
                 <button
                   key={link.to}
-                  onClick={() => navigate(link.to)}
+                  onClick={() => window.location.href = link.to}
                   className="flex items-center gap-2 w-full text-left rounded-lg px-3 py-2 text-xs text-slate-400 hover:bg-night-800 hover:text-slate-200 transition-colors"
                 >
                   {link.icon} {link.label} <ChevronRight className="ml-auto h-3 w-3 opacity-50" />
@@ -578,49 +480,6 @@ export default function IncidentReports() {
           </Card>
         </div>
       </div>
-
-      {/* Report Preview Modal */}
-      {viewing && (
-        <Modal
-          open={!!viewing}
-          onClose={() => setViewing(null)}
-          title={viewing.report.title || "Security Report"}
-          footer={
-            <div className="flex gap-2">
-              {viewing.pdf_available ? (
-                <button
-                  className="btn-primary"
-                  onClick={() => window.open(`/reports/${viewing.report.id}/pdf`, "_blank")}
-                >
-                  <Download className="h-4 w-4 mr-1" /> Download PDF
-                </button>
-              ) : (
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    handleGenerateClick(viewing.report.id);
-                    setViewing(null);
-                  }}
-                >
-                  <Shield className="h-4 w-4 mr-1" /> Generate Report
-                </button>
-              )}
-            </div>
-          }
-        >
-          <ReportPreview
-            report={viewing}
-            onClose={() => setViewing(null)}
-            onDownload={() => window.open(`/reports/${viewing?.report.id}/pdf`, "_blank")}
-            verifying={false}
-            onVerifyClick={() => {
-              setPendingIncident(viewing.report.id as string);
-              setViewing(null);
-              setShowTfaVerify(true);
-            }}
-          />
-        </Modal>
-      )}
     </div>
   );
 }

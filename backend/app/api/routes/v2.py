@@ -146,8 +146,8 @@ async def scan_dataset_v2(request: ScanRequest):
         db = SessionLocal()
 
         # Phase 1-2: Parse & Detect (via existing scanner)
-        # Cap at 1K rows to prevent timeout/memory issues on Render free tier
-        effective_limit = request.limit if request.limit > 0 else 1000
+        # limit=0 means scan ALL rows; user can pass a specific limit to cap
+        effective_limit = request.limit if request.limit and request.limit > 0 else 0
         result = scan_dataset_file(db, path, limit=effective_limit, scan_id=scan_id)
 
         # Phase 3-4: Cybercrime intelligence enrichment

@@ -178,27 +178,59 @@ function UploadArea({
 
 /* ── File Info Card ────────────────────────────────────────────────── */
 
-function FileInfoCard({ file, onScan }: { file: File; onScan: () => void }) {
+function FileInfoCard({ file, onScan, rowLimit, onRowLimitChange }: { file: File; onScan: () => void; rowLimit: number; onRowLimitChange: (v: number) => void }) {
   return (
     <Card title="Dataset Ready" subtitle={`${file.name} · ${(file.size / 1024).toFixed(1)} KB`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-electric-500/15 text-electric-400">
-            {file.name.endsWith(".csv") ? <FileText className="h-5 w-5" /> :
-             file.name.endsWith(".json") ? <FileJson className="h-5 w-5" /> :
-             <Database className="h-5 w-5" />}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-electric-500/15 text-electric-400">
+              {file.name.endsWith(".csv") ? <FileText className="h-5 w-5" /> :
+               file.name.endsWith(".json") ? <FileJson className="h-5 w-5" /> :
+               <Database className="h-5 w-5" />}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-200">{file.name}</p>
+              <p className="text-[11px] text-slate-500">
+                {file.type || "unknown type"} · {(file.size / 1024).toFixed(1)} KB
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-slate-200">{file.name}</p>
-            <p className="text-[11px] text-slate-500">
-              {file.type || "unknown type"} · {(file.size / 1024).toFixed(1)} KB
-            </p>
-          </div>
+          <button onClick={onScan} className="btn-primary px-5 py-2.5 text-sm">
+            <ScanSearch className="h-4 w-4" />
+            Start Intelligence Scan
+          </button>
         </div>
-        <button onClick={onScan} className="btn-primary px-5 py-2.5 text-sm">
-          <ScanSearch className="h-4 w-4" />
-          Start Intelligence Scan
-        </button>
+        {/* Row limit selector */}
+        <div>
+          <p className="label">Row Limit</p>
+          <div className="flex gap-2">
+            {[
+              { label: "10K", value: 10000 },
+              { label: "50K", value: 50000 },
+              { label: "100K", value: 100000 },
+              { label: "500K", value: 500000 },
+              { label: "All", value: 0 },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => onRowLimitChange(opt.value)}
+                className={`rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+                  rowLimit === opt.value
+                    ? "bg-electric-500/20 text-electric-400 ring-1 ring-electric-500/40"
+                    : "bg-night-800/60 text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-600">
+            {rowLimit === 0
+              ? "Scans ALL rows — may take longer on large files"
+              : `Scans up to ${rowLimit.toLocaleString()} rows — faster, uses less memory`}
+          </p>
+        </div>
       </div>
     </Card>
   );
@@ -545,6 +577,7 @@ export default function CybercrimeScanner() {
   const [error, setError] = useState<string | null>(null);
   const [datasets, setDatasets] = useState<Array<{ name: string; rows: number; source: string }>>([]);
   const [selectedDataset, setSelectedDataset] = useState("");
+  const [rowLimit, setRowLimit] = useState<number>(0); // 0 = all rows
 
   // Load available datasets on mount
   useEffect(() => {
@@ -638,7 +671,7 @@ export default function CybercrimeScanner() {
       }
 
       const stage = STAGES[Math.min(stageIdx, STAGES.length - 1)];
-      const totalRecords = 500; // Will be updated from response
+      const totalRecords = rowLimit > 0 ? rowLimit : 10000; // estimate until response
       const recordsScanned = Math.floor((basePercent / 100) * totalRecords);
 
       setProgress({
@@ -658,10 +691,9 @@ export default function CybercrimeScanner() {
       // Warm up backend if sleeping
       try { await api.get("/health", { timeout: 10000 }); } catch { await new Promise(r => setTimeout(r, 5000)); }
 
-      const res = await api.post(`/v2/scan`, {
-        dataset: selectedDataset,
-        limit: 500,
-      }, { timeout: 180000 });
+      const scanPayload: { dataset: string; limit?: number } = { dataset: selectedDataset };
+      if (rowLimit > 0) scanPayload.limit = rowLimit;
+      const res = await api.post(`/v2/scan`, scanPayload, { timeout: 300000 }); // 5 min for large datasets
 
       clearInterval(progressInterval);
 
@@ -716,35 +748,68 @@ export default function CybercrimeScanner() {
           <UploadArea onFileSelected={handleFileSelected} uploading={uploading} />
 
           {file && !uploading && !scanning && (
-            <FileInfoCard file={file} onScan={runScan} />
+            <FileInfoCard file={file} onScan={runScan} rowLimit={rowLimit} onRowLimitChange={setRowLimit} />
           )}
 
           {/* Or select existing dataset */}
           {datasets.length > 0 && !file && (
             <Card title="Or Select Existing Dataset">
-              <div className="flex items-end gap-3">
-                <div className="flex-1">
-                  <p className="label">Dataset</p>
-                  <select
-                    value={selectedDataset}
-                    onChange={(e) => setSelectedDataset(e.target.value)}
-                    className="input"
+              <div className="space-y-4">
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <p className="label">Dataset</p>
+                    <select
+                      value={selectedDataset}
+                      onChange={(e) => setSelectedDataset(e.target.value)}
+                      className="input"
+                    >
+                      {datasets.map((d) => (
+                        <option key={d.name} value={d.name}>
+                          {d.name} ({d.rows.toLocaleString()} rows) — {d.source}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={runScan}
+                    disabled={!selectedDataset || scanning}
+                    className="btn-primary px-5 py-2.5 text-sm"
                   >
-                    {datasets.map((d) => (
-                      <option key={d.name} value={d.name}>
-                        {d.name} ({d.rows.toLocaleString()} rows) — {d.source}
-                      </option>
-                    ))}
-                  </select>
+                    <ScanSearch className="h-4 w-4" />
+                    Scan Dataset
+                  </button>
                 </div>
-                <button
-                  onClick={runScan}
-                  disabled={!selectedDataset || scanning}
-                  className="btn-primary px-5 py-2.5 text-sm"
-                >
-                  <ScanSearch className="h-4 w-4" />
-                  Scan Dataset
-                </button>
+
+                {/* Row limit selector */}
+                <div>
+                  <p className="label">Row Limit</p>
+                  <div className="flex gap-2">
+                    {[
+                      { label: "10K", value: 10000 },
+                      { label: "50K", value: 50000 },
+                      { label: "100K", value: 100000 },
+                      { label: "500K", value: 500000 },
+                      { label: "All", value: 0 },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setRowLimit(opt.value)}
+                        className={`rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+                          rowLimit === opt.value
+                            ? "bg-electric-500/20 text-electric-400 ring-1 ring-electric-500/40"
+                            : "bg-night-800/60 text-slate-500 hover:text-slate-300"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-slate-600">
+                    {rowLimit === 0
+                      ? "Scans ALL rows — may take longer on large files"
+                      : `Scans up to ${rowLimit.toLocaleString()} rows — faster, uses less memory`}
+                  </p>
+                </div>
               </div>
             </Card>
           )}

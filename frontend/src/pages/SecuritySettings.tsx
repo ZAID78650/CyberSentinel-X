@@ -33,11 +33,11 @@ interface TFASetupData {
 }
 
 /** Wait for the Render backend to wake up by polling /health. */
-async function waitForBackend(maxAttempts = 3, delayMs = 3000): Promise<void> {
+async function waitForBackend(maxAttempts = 5, delayMs = 3000): Promise<void> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 8000);
+      const t = setTimeout(() => controller.abort(), 10000);
       const res = await fetch("/health", { signal: controller.signal });
       clearTimeout(t);
       if (res.ok) return;
@@ -47,17 +47,17 @@ async function waitForBackend(maxAttempts = 3, delayMs = 3000): Promise<void> {
 }
 
 /** POST with retry for 502/503 (Render cold-start). */
-async function postWithRetry<T>(url: string, body: unknown, retries = 2): Promise<{ data: T }> {
+async function postWithRetry<T>(url: string, body: unknown, retries = 3): Promise<{ data: T }> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await api.post<T>(url, body);
+      return await api.post<T>(url, body, { timeout: 60000 });
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
       const status = axiosErr.response?.status;
       const isLast = attempt === retries;
-      // Retry on 502 / 503 / network (Render cold-start)
-      if (!isLast && (!status || status === 502 || status === 503)) {
-        await waitForBackend(1, 2000);
+      // Retry on 500 / 502 / 503 / network (Render cold-start)
+      if (!isLast && (!status || status >= 500)) {
+        await waitForBackend(2, 3000);
         continue;
       }
       throw err;

@@ -35,8 +35,13 @@ function TFASetupPanel() {
 
   const queryClient = useQueryClient();
 
+  const warmUp = async () => {
+    try { await api.get("/health"); } catch { /* ignore */ }
+  };
+
   const setupMutation = useMutation({
     mutationFn: async () => {
+      await warmUp();
       const res = await api.get<{ secret: string; uri: string; enabled: boolean }>("/auth/2fa/setup");
       return res.data;
     },
@@ -53,6 +58,7 @@ function TFASetupPanel() {
 
   const verifyMutation = useMutation({
     mutationFn: async (code: string) => {
+      await warmUp();
       const res = await api.post("/auth/2fa/verify", { code, action: "enable" });
       return res.data as TFAResult;
     },

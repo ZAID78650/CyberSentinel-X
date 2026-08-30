@@ -327,8 +327,13 @@ export default function IncidentReports() {
     },
   });
 
+  const warmUp = async () => {
+    try { await api.get("/health"); } catch { /* ignore */ }
+  };
+
   const generateMutation = useMutation({
     mutationFn: async (id: string) => {
+      await warmUp();
       return (await api.post(`/reports/${id}/generate`)).data;
     },
     onSuccess: (data) => {

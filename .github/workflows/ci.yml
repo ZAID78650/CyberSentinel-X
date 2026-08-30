@@ -67,10 +67,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build backend image
-        run: docker build -t cybersentinel-backend:ci ./backend
+        run: docker build -t cybersentinel-backend:ci -f backend/Dockerfile .
 
       - name: Build frontend image
-        run: docker build -t cybersentinel-frontend:ci ./frontend
+        run: docker build -t cybersentinel-frontend:ci -f frontend/Dockerfile .
 
       - name: Compose config check
         run: docker compose config -q

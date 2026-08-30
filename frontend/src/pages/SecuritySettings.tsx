@@ -23,7 +23,41 @@ interface TFAResult {
   warning?: string;
 }
 
-// ── 2FA Setup Panel ─────────────────────────────────────────────────────
+/** Wait for the Render backend to wake up by polling /health. */
+async function waitForBackend(maxAttempts = 3, delayMs = 3000): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch("/health", { signal: controller.signal });
+      clearTimeout(t);
+      if (res.ok) return;
+    } catch { /* backend still waking */ }
+    if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs));
+  }
+}
+
+/** POST with retry for 502/503 (Render cold-start). */
+async function postWithRetry<T>(url: string, body: unknown, retries = 2): Promise<{ data: T }> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await api.post<T>(url, body);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number } };
+      const status = axiosErr.response?.status;
+      const isLast = attempt === retries;
+      // Retry on 502 / 503 / network (Render cold-start)
+      if (!isLast && (!status || status === 502 || status === 503)) {
+        await waitForBackend(1, 2000);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Unreachable");
+}
+
+// ── 2FA Setup Panel ────────────────────────────────────────────────────
 
 function TFASetupPanel() {
   const [secret, setSecret] = useState("");
@@ -35,13 +69,9 @@ function TFASetupPanel() {
 
   const queryClient = useQueryClient();
 
-  const warmUp = async () => {
-    try { await api.get("/health"); } catch { /* ignore */ }
-  };
-
   const setupMutation = useMutation({
     mutationFn: async () => {
-      await warmUp();
+      await waitForBackend();
       const res = await api.get<{ secret: string; uri: string; enabled: boolean }>("/auth/2fa/setup");
       return res.data;
     },
@@ -50,6 +80,7 @@ function TFASetupPanel() {
       setQrUri(data.uri);
       setResult(null);
       setCopied(false);
+      setError("");
     },
     onError: (err: unknown) => {
       setError(getErrorMessage(err));
@@ -58,13 +89,16 @@ function TFASetupPanel() {
 
   const verifyMutation = useMutation({
     mutationFn: async (code: string) => {
-      await warmUp();
-      const res = await api.post("/auth/2fa/verify", { code, action: "enable" });
-      return res.data as TFAResult;
+      await waitForBackend();
+      const res = await postWithRetry<TFAResult>("/auth/2fa/verify", { code, action: "enable" }, 2);
+      return res.data;
     },
     onSuccess: (data) => {
       setResult(data);
+      setError("");
+      setVerifyCode("");
       queryClient.invalidateQueries({ queryKey: ["auth-me"] });
+      queryClient.invalidateQueries({ queryKey: ["tfa-status"] });
     },
     onError: (err: unknown) => {
       setError(getErrorMessage(err));
@@ -89,9 +123,26 @@ function TFASetupPanel() {
         </div>
       </div>
 
+      {/* Error banner — always visible when set */}
+      {(error || setupMutation.isError || verifyMutation.isError) && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-red-400" />
+          <div>
+            <p className="font-semibold">Verification Failed</p>
+            <p className="text-xs text-red-400 mt-1">
+              {error || getErrorMessage(setupMutation.error || verifyMutation.error)}
+            </p>
+            <p className="text-[11px] text-red-500 mt-1">
+              Make sure you entered the correct 6-digit code from your authenticator app. The code changes every 30 seconds.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Setup button — shown when no secret yet and no result */}
       {!secret && !result && (
         <button
-          onClick={() => setupMutation.mutate()}
+          onClick={() => { setError(""); setupMutation.mutate(); }}
           disabled={setupMutation.isPending}
           className="btn-primary"
         >
@@ -103,13 +154,19 @@ function TFASetupPanel() {
         </button>
       )}
 
-      {setupMutation.isError && (
-        <div className="rounded-lg border border-cyber-red/30 bg-cyber-red/10 p-3 text-sm text-cyber-red">
-          {error || getErrorMessage(setupMutation.error)}
+      {/* Loading spinner during verification */}
+      {verifyMutation.isPending && (
+        <div className="rounded-lg border border-electric-500/30 bg-electric-500/5 p-4 flex items-center gap-3">
+          <RefreshCw className="h-5 w-5 text-electric-400 animate-spin" />
+          <div>
+            <p className="text-sm font-semibold text-electric-300">Verifying your code...</p>
+            <p className="text-xs text-slate-500">Waking up backend, this may take a moment.</p>
+          </div>
         </div>
       )}
 
-      {secret && !result && (
+      {/* QR code + verification input */}
+      {secret && !result && !verifyMutation.isPending && (
         <div className="space-y-4">
           <div className="rounded-lg border border-cyber-yellow/30 bg-cyber-yellow/5 p-4">
             <p className="text-xs font-bold text-cyber-yellow mb-2">Step 1: Add to your authenticator app</p>
@@ -153,9 +210,11 @@ function TFASetupPanel() {
                 onChange={(e) => {
                   const val = e.target.value.replace(/[^0-9]/g, "").slice(0, 6);
                   setVerifyCode(val);
+                  setError(""); // clear error on new input
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && verifyCode.length === 6) {
+                    setError("");
                     verifyMutation.mutate(verifyCode);
                   }
                 }}
@@ -163,7 +222,7 @@ function TFASetupPanel() {
               <button
                 className="btn-primary"
                 disabled={verifyCode.length !== 6 || verifyMutation.isPending}
-                onClick={() => verifyMutation.mutate(verifyCode)}
+                onClick={() => { setError(""); verifyMutation.mutate(verifyCode); }}
               >
                 {verifyMutation.isPending ? (
                   <RefreshCw className="h-4 w-4 animate-spin" />
@@ -176,18 +235,22 @@ function TFASetupPanel() {
         </div>
       )}
 
+      {/* ✅ SUCCESS — with backup codes */}
       {result && result.backup_codes && (
-        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-5">
-          <div className="flex items-center gap-2 mb-3">
+        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-5 space-y-4">
+          <div className="flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5 text-green-400" />
-            <p className="text-sm font-bold text-green-400">{result.message}</p>
+            <p className="text-sm font-bold text-green-400">{result.message || "2FA has been enabled successfully!"}</p>
           </div>
+          <p className="text-xs text-green-300/80">
+            Your account is now protected with two-factor authentication. You will need to enter a code from your authenticator app each time you log in.
+          </p>
 
           <div className="rounded-lg bg-night-800 p-4">
             <p className="text-xs font-bold text-slate-300 mb-3">🔑 Your Backup Codes — Save These Now!</p>
             <p className="text-[11px] text-amber-400 mb-3 flex items-center gap-1.5">
               <AlertTriangle className="h-3.5 w-3.5" />
-              {result.warning}
+              {result.warning || "These codes will not be shown again. Store them securely."}
             </p>
             <div className="grid grid-cols-2 gap-2 font-mono text-sm">
               {result.backup_codes.map((code, i) => (
@@ -198,12 +261,22 @@ function TFASetupPanel() {
               ))}
             </div>
           </div>
+
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(result.backup_codes!.join("\n"));
+            }}
+            className="text-xs text-electric-400 hover:text-electric-300 flex items-center gap-1"
+          >
+            <Copy className="h-3 w-3" /> Copy All Backup Codes
+          </button>
         </div>
       )}
 
+      {/* ✅ SUCCESS — without backup codes (edge case) */}
       {result && !result.backup_codes && (
         <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-          <CheckCircle2 className="h-5 w-5 text-green-400 shrink-0" />
+          <CheckCircle2 className="h-5 w-5 text-green-400" />
           <span className="text-sm text-green-300">{result.message}</span>
         </div>
       )}
@@ -215,7 +288,8 @@ function TFASetupPanel() {
 
 function TFAStatusCard() {
   const { data: status, isLoading, refetch } = useQuery({
-    queryKey: ["tfa-status"],      queryFn: async () => (await api.get("/auth/2fa/status")).data as TFAStatus,
+    queryKey: ["tfa-status"],
+    queryFn: async () => (await api.get("/auth/2fa/status")).data as TFAStatus,
   });
 
   const [disableCode, setDisableCode] = useState("");
@@ -226,11 +300,13 @@ function TFAStatusCard() {
 
   const disableMutation = useMutation({
     mutationFn: async (code: string) => {
-      const res = await api.post("/auth/2fa/verify", { code, action: "disable" });
-      return (res.data as TFAResult).message;
+      await waitForBackend();
+      const res = await postWithRetry<TFAResult>("/auth/2fa/verify", { code, action: "disable" }, 2);
+      return res.data;
     },
-    onSuccess: (msg) => {
-      setDisableResult(msg);
+    onSuccess: (data) => {
+      setDisableResult(data.message);
+      setDisableError("");
       queryClient.invalidateQueries({ queryKey: ["auth-me"] });
       queryClient.invalidateQueries({ queryKey: ["tfa-status"] });
     },
@@ -321,6 +397,7 @@ function BackupCodesPanel() {
 
   const generateMutation = useMutation({
     mutationFn: async () => {
+      await waitForBackend();
       const res = await api.get("/auth/2fa/backup-codes");
       return res.data as { codes: string[]; warning: string };
     },

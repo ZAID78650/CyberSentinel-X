@@ -649,9 +649,8 @@ def verify_2fa(req: TwoFactorVerifyRequest, request: Request, db: Session = Depe
             log_action(db, actor=user.email, action="TFA.ENABLED",
                        target_type="user", target_id=str(user.id), ip_address=ip)
             # Generate backup codes
-            from app.services.totp import generate_backup_codes, hash_backup_code
-            codes = [generate_backup_codes() for _ in range(8)]
-            # Note: In production, store the hashed codes. For now, return plain codes once.
+            from app.services.totp import generate_backup_codes
+            codes = generate_backup_codes(8)  # returns a flat list of 8 codes
             return {
                 "valid": True,
                 "message": "2FA has been enabled successfully.",

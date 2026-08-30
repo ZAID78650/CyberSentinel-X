@@ -126,7 +126,7 @@ def _get_request_origin(request: Request) -> str:
     return ""
 
 
-def _state_cookie(response: Response) -> str:
+def _state_cookie(response: Response, redirect_uri: str = "") -> str:
     """Issue the CSRF state cookie and return the bare token."""
     state = secrets.token_urlsafe(24)
     response.set_cookie(
@@ -138,6 +138,17 @@ def _state_cookie(response: Response) -> str:
         secure=(get_settings().environment != "test"),  # secure on production/staging, not in tests
         path="/api/auth/oauth",
     )
+    # Also store the redirect_uri so the callback uses the same one for token exchange
+    if redirect_uri:
+        response.set_cookie(
+            key="csx_oauth_redirect",
+            value=redirect_uri,
+            max_age=600,
+            httponly=True,
+            samesite="lax",
+            secure=(get_settings().environment != "test"),
+            path="/api/auth/oauth",
+        )
     return state
 
 
@@ -161,7 +172,8 @@ def authorize(provider: str, request: Request, response: Response):
     if not client_id:
         return {"provider": provider, "configured": False,
                 "message": f"{provider.capitalize()} SSO is not configured. Add {cfg['client_id_env']} to your environment."}
-    state = _state_cookie(response)
+    redirect_uri = _redirect_uri(provider, request)
+    state = _state_cookie(response, redirect_uri)
     return {"provider": provider, "configured": True, "authorize_url": _build_authorize_url(provider, state, request)}
 
 
@@ -182,7 +194,8 @@ def link_authorize(
     if not client_id:
         return {"provider": provider, "configured": False,
                 "message": f"{provider.capitalize()} SSO is not configured. Add {cfg['client_id_env']} to your environment."}
-    state = _state_cookie(response)
+    link_redirect = _redirect_uri(provider, request)
+    state = _state_cookie(response, link_redirect)
     return {
         "provider": provider,
         "configured": True,
@@ -247,7 +260,10 @@ async def callback(
     if not expected_state or len(token) != len(expected_state) or not secrets.compare_digest(token, expected_state):
         raise HTTPException(status_code=400, detail="OAuth state mismatch. Please try again.")
 
-    redirect_uri = _redirect_uri(provider)
+    # Use the same redirect_uri that was used during authorization.
+    # It was stored in a cookie by the /authorize endpoint.
+    stored_redirect_uri = request.cookies.get("csx_oauth_redirect") if request else None
+    redirect_uri = stored_redirect_uri or _redirect_uri(provider, request)
 
     # 1) Exchange the authorization code for tokens
     try:

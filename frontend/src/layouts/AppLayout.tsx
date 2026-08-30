@@ -225,9 +225,9 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
         <button type="submit" className="text-[10px] font-semibold uppercase text-electric-400 hover:underline">Go</button>
       </form>
 
-      <div className="flex items-center gap-1.5 rounded-full border px-3 py-1" style={{ borderColor: demoMode ? "var(--border-warning, #f59e0b)" : connected ? "rgba(34,197,94,0.3)" : "rgba(234,179,8,0.3)", background: demoMode ? "rgba(245,158,11,0.1)" : connected ? "rgba(34,197,94,0.1)" : "rgba(234,179,8,0.1)" }}>
-        <span className={`h-2 w-2 rounded-full animate-pulse`} style={{ background: demoMode ? "#f59e0b" : connected ? "#22c55e" : "#eab308" }} />
-        <span className="text-[11px] font-semibold" style={{ color: demoMode ? "#f59e0b" : connected ? "#22c55e" : "#eab308" }}>{demoMode ? "DEMO MODE" : connected ? "REAL-TIME" : "CONNECTING"}</span>
+      <div className="flex items-center gap-1.5 rounded-full border px-3 py-1" style={{ borderColor: demoMode ? "var(--border-warning, #f59e0b)" : connected ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)", background: demoMode ? "rgba(245,158,11,0.1)" : connected ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)" }}>
+        <span className={`h-2 w-2 rounded-full${connected ? ' animate-pulse' : ''}`} style={{ background: demoMode ? "#f59e0b" : connected ? "#22c55e" : "#ef4444" }} />
+        <span className="text-[11px] font-semibold" style={{ color: demoMode ? "#f59e0b" : connected ? "#22c55e" : "#ef4444" }}>{demoMode ? "DEMO MODE" : connected ? "ONLINE" : "OFFLINE"}</span>
       </div>
 
       <button

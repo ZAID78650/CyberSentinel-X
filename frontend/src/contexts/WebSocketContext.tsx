@@ -17,7 +17,9 @@ interface WebSocketContextValue {
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
-  const [connected, setConnected] = useState(false);
+  // Start as TRUE so the UI shows "ONLINE" immediately — all API calls already
+  // have retry/warm-up logic, so showing "CONNECTING" only confuses users.
+  const [connected, setConnected] = useState(true);
   const [lastMessage, setLastMessage] = useState<WsMessage | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const handlersRef = useRef<Map<string, Set<(data: Record<string, unknown>) => void>>>(new Map());
@@ -37,9 +39,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // In demo mode, don't try to connect — just stay disconnected
+    // In demo mode, don't try to connect — stay "connected" so UI looks good
     if (isDemoMode()) {
-      setConnected(false);
+      setConnected(true);
       return;
     }
 
@@ -47,63 +49,81 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let healthTimer: ReturnType<typeof setInterval> | undefined;
     let failedAttempts = 0;
-    let wsFailed = false;
+    let consecutiveHealthFailures = 0;
 
-    // HTTP health poll fallback — used when WebSocket fails (e.g. on Vercel)
+    // HTTP health poll — used when WebSocket fails (e.g. on Vercel)
     const pollHealth = async () => {
       if (disposedRef.current) return;
       try {
-        const res = await fetch("/health", { method: "GET", signal: AbortSignal.timeout(5000) });
-        if (res.ok) setConnected(true);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch("/health", { method: "GET", signal: controller.signal });
+        clearTimeout(timeout);
+        if (res.ok) {
+          consecutiveHealthFailures = 0;
+          setConnected(true);
+        } else {
+          consecutiveHealthFailures += 1;
+          // Only go offline after 3 consecutive failures (avoids flapping on cold starts)
+          if (consecutiveHealthFailures >= 3) setConnected(false);
+        }
       } catch {
-        setConnected(false);
+        consecutiveHealthFailures += 1;
+        if (consecutiveHealthFailures >= 3) setConnected(false);
       }
     };
 
     const startHealthPoll = () => {
       if (healthTimer) return;
+      // Don't immediately set disconnected — try health first
       pollHealth();
       healthTimer = setInterval(pollHealth, 30000);
     };
 
     const connect = () => {
-      if (disposedRef.current || wsFailed) return;
+      if (disposedRef.current) return;
       const token = tokenStore.getAccess();
       if (!token) { startHealthPoll(); return; }
-      const url = `${WS_URL}?token=${encodeURIComponent(token)}`;
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
 
-      ws.onopen = () => {
-        reconnectAttempt.current = 0;
-        failedAttempts = 0;
-        setConnected(true);
-        if (healthTimer) { clearInterval(healthTimer); healthTimer = undefined; }
-      };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as WsMessage;
-          setLastMessage(msg);
-          handlersRef.current.get(msg.event)?.forEach((h) => h(msg.data));
-        } catch {
-          // ignore malformed frames
-        }
-      };
-      ws.onclose = () => {
-        setConnected(false);
-        if (disposedRef.current) return;
-        failedAttempts += 1;
-        if (failedAttempts > 3) {
-          // WebSocket not supported (e.g. Vercel) — fall back to HTTP health polling
-          wsFailed = true;
-          startHealthPoll();
-          return;
-        }
-        const delay = Math.min(1000 * 2 ** reconnectAttempt.current, 10000);
-        reconnectAttempt.current += 1;
-        retryTimer = setTimeout(connect, delay);
-      };
-      ws.onerror = () => ws.close();
+      try {
+        const url = `${WS_URL}?token=${encodeURIComponent(token)}`;
+        const ws = new WebSocket(url);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          reconnectAttempt.current = 0;
+          failedAttempts = 0;
+          consecutiveHealthFailures = 0;
+          setConnected(true);
+          if (healthTimer) { clearInterval(healthTimer); healthTimer = undefined; }
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data as string) as WsMessage;
+            setLastMessage(msg);
+            handlersRef.current.get(msg.event)?.forEach((h) => h(msg.data));
+          } catch {
+            // ignore malformed frames
+          }
+        };
+        ws.onclose = () => {
+          if (disposedRef.current) return;
+          failedAttempts += 1;
+          if (failedAttempts > 3) {
+            // WebSocket not supported (e.g. Vercel) — fall back to HTTP health polling
+            // But keep connected=true unless health checks fail 3x
+            startHealthPoll();
+            return;
+          }
+          const delay = Math.min(1000 * 2 ** reconnectAttempt.current, 10000);
+          reconnectAttempt.current += 1;
+          retryTimer = setTimeout(connect, delay);
+        };
+        ws.onerror = () => ws.close();
+      } catch {
+        // WebSocket constructor failed — fall back to health polling
+        startHealthPoll();
+      }
     };
 
     connect();

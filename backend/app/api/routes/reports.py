@@ -1,4 +1,5 @@
 """Incident report routes — with 2FA authorization and real-time data."""
+from __future__ import annotations
 import logging
 import time
 import traceback

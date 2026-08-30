@@ -194,13 +194,18 @@ export default function WhatIfSimulation() {
     ...(backendComplaints ?? []).filter((bc) => !allComplaints.find((ac) => ac.complaint_id === bc.complaint_id)),
   ];
 
+  const warmUp = async () => {
+    try { await api.get("/health", { timeout: 15000 }); } catch { /* wake Render */ }
+  };
+
   // Run simulation mutation
   const { mutate, data: simResult, isPending, error } = useMutation({
     mutationFn: async (params: { base_complaint_id: string; scenarios: Scenario[] }) => {
+      await warmUp();
       return (await api.post("/v2/what-if", {
         base_complaint_id: params.base_complaint_id,
         scenarios: params.scenarios,
-      })).data;
+      }, { timeout: 120000 })).data;
     },
   });
 

@@ -640,70 +640,70 @@ def setup_2fa(db: Session = Depends(get_db), user: User = Depends(get_current_us
 
 @router.post("/2fa/verify")
 def verify_2fa(req: TwoFactorVerifyRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Verify a TOTP code and optionally enable 2FA.
-
-    - When action is 'enable': verifies the code and enables 2FA if valid.
-    - When action is 'verify': verifies the code (for login flow).
-    - When action is 'disable': verifies current code then disables 2FA.
-    """
+    """Verify a TOTP code and optionally enable 2FA."""
+    import traceback as _tb
     from app.services.audit import log_action
-    from app.schemas.auth import TwoFactorBackupCodesResponse
-    
-    if not user.tfa_secret:
-        raise HTTPException(status_code=400, detail="2FA is not set up. Call /api/auth/2fa/setup first.")
-    
-    ip = get_client_ip(request)
-    is_valid = totp_verify_token(user.tfa_secret, req.code)
-    
-    if req.action == "verify":
-        # Just verify without enabling (used during login flow)
-        if is_valid:
-            log_action(db, actor=user.email, action="TFA.VERIFY_SUCCESS",
-                       target_type="user", target_id=str(user.id), ip_address=ip)
-            return {"valid": True, "message": "Code verified successfully."}
+
+    try:
+        if not user.tfa_secret:
+            raise HTTPException(status_code=400, detail="2FA is not set up. Call /api/auth/2fa/setup first.")
+
+        ip = get_client_ip(request)
+        is_valid = totp_verify_token(user.tfa_secret, req.code)
+
+        if req.action == "verify":
+            if is_valid:
+                log_action(db, actor=user.email, action="TFA.VERIFY_SUCCESS",
+                           target_type="user", target_id=str(user.id), ip_address=ip)
+                return {"valid": True, "message": "Code verified successfully."}
+            else:
+                log_action(db, actor=user.email, action="TFA.VERIFY_FAIL",
+                           target_type="user", target_id=str(user.id), ip_address=ip)
+                raise HTTPException(status_code=400, detail="Invalid verification code. Please try again.")
+
+        elif req.action == "enable":
+            if is_valid:
+                user.tfa_enabled = True
+                user.tfa_verified = True
+                db.commit()
+                log_action(db, actor=user.email, action="TFA.ENABLED",
+                           target_type="user", target_id=str(user.id), ip_address=ip)
+                from app.services.totp import generate_backup_codes
+                codes = generate_backup_codes(8)
+                return {
+                    "valid": True,
+                    "message": "2FA has been enabled successfully.",
+                    "backup_codes": codes,
+                    "warning": "Save these backup codes securely. They will not be shown again."
+                }
+            else:
+                log_action(db, actor=user.email, action="TFA.ENABLE_FAILED",
+                           target_type="user", target_id=str(user.id), ip_address=ip)
+                raise HTTPException(status_code=400, detail="Invalid verification code. 2FA has not been enabled.")
+
+        elif req.action == "disable":
+            if not user.tfa_enabled:
+                raise HTTPException(status_code=400, detail="2FA is not currently enabled.")
+            if is_valid:
+                user.tfa_enabled = False
+                user.tfa_verified = False
+                db.commit()
+                log_action(db, actor=user.email, action="TFA.DISABLED",
+                           target_type="user", target_id=str(user.id), ip_address=ip)
+                return {"valid": True, "message": "2FA has been disabled successfully."}
+            else:
+                log_action(db, actor=user.email, action="TFA.DISABLE_FAILED",
+                           target_type="user", target_id=str(user.id), ip_address=ip)
+                raise HTTPException(status_code=400, detail="Invalid verification code. 2FA has not been disabled.")
+
         else:
-            log_action(db, actor=user.email, action="TFA.VERIFY_FAIL",
-                       target_type="user", target_id=str(user.id), ip_address=ip)
-            raise HTTPException(status_code=400, detail="Invalid verification code. Please try again.")
-    
-    elif req.action == "enable":
-        if is_valid:
-            user.tfa_enabled = True
-            user.tfa_verified = True
-            db.commit()
-            log_action(db, actor=user.email, action="TFA.ENABLED",
-                       target_type="user", target_id=str(user.id), ip_address=ip)
-            # Generate backup codes
-            from app.services.totp import generate_backup_codes
-            codes = generate_backup_codes(8)  # returns a flat list of 8 codes
-            return {
-                "valid": True,
-                "message": "2FA has been enabled successfully.",
-                "backup_codes": codes,
-                "warning": "Save these backup codes securely. They will not be shown again."
-            }
-        else:
-            log_action(db, actor=user.email, action="TFA.ENABLE_FAILED",
-                       target_type="user", target_id=str(user.id), ip_address=ip)
-            raise HTTPException(status_code=400, detail="Invalid verification code. 2FA has not been enabled.")
-    
-    elif req.action == "disable":
-        if not user.tfa_enabled:
-            raise HTTPException(status_code=400, detail="2FA is not currently enabled.")
-        if is_valid:
-            user.tfa_enabled = False
-            user.tfa_verified = False
-            db.commit()
-            log_action(db, actor=user.email, action="TFA.DISABLED",
-                       target_type="user", target_id=str(user.id), ip_address=ip)
-            return {"valid": True, "message": "2FA has been disabled successfully."}
-        else:
-            log_action(db, actor=user.email, action="TFA.DISABLE_FAILED",
-                       target_type="user", target_id=str(user.id), ip_address=ip)
-            raise HTTPException(status_code=400, detail="Invalid verification code. 2FA has not been disabled.")
-    
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid action: {req.action}. Use 'enable', 'verify', or 'disable'.")
+            raise HTTPException(status_code=400, detail=f"Invalid action: {req.action}. Use 'enable', 'verify', or 'disable'.")
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("2FA verify failed: %s\n%s", exc, _tb.format_exc())
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(exc)[:200]}")
 
 
 @router.get("/2fa/status")
